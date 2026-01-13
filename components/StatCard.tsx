@@ -1,14 +1,15 @@
+
 import React from 'react';
 import { StatCardProps } from '../types';
 
 const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color = "text-white" }) => {
   return (
-    <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 shadow-sm flex items-center justify-between">
-      <div>
-        <p className="text-gray-400 text-xs uppercase font-semibold tracking-wider">{title}</p>
-        <h3 className={`text-2xl font-bold mt-1 ${color}`}>{value}</h3>
+    <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-lg flex items-center justify-between h-full w-full group hover:border-blue-500/50 transition-all duration-300">
+      <div className="min-w-0">
+        <p className="text-gray-500 text-[10px] uppercase font-bold tracking-widest truncate">{title}</p>
+        <h3 className={`text-xl lg:text-2xl font-black mt-1 truncate ${color} tracking-tight`}>{value}</h3>
       </div>
-      <div className="p-3 bg-gray-700 rounded-full opacity-80">
+      <div className="p-3 bg-gray-900/50 rounded-lg border border-gray-700 group-hover:bg-blue-900/10 group-hover:border-blue-500/30 transition-colors flex-shrink-0">
         {icon}
       </div>
     </div>

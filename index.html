@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -26,6 +27,42 @@
     </script>
     <style>
       body { background-color: #0f172a; color: #e2e8f0; }
+      
+      /* React Grid Layout Essential Styles */
+      .react-grid-layout { position: relative; transition: height 200ms ease; }
+      .react-grid-item { transition: all 200ms ease; transition-property: left, top; }
+      .react-grid-item.cssTransforms { transition-property: transform; }
+      .react-grid-item.resizing { z-index: 1; will-change: width, height; }
+      .react-grid-item.react-draggable-dragging { transition: none; z-index: 3; will-change: transform; cursor: grabbing !important; }
+      .react-grid-item.dropping { visibility: hidden; }
+      .react-grid-item.react-grid-placeholder { 
+        background: rgba(59, 130, 246, 0.1) !important; 
+        border: 2px dashed rgba(59, 130, 246, 0.5) !important;
+        border-radius: 0.75rem !important; 
+        z-index: 2; 
+        user-select: none; 
+      }
+      .react-resizable-handle { 
+        position: absolute; 
+        width: 20px; 
+        height: 20px; 
+        bottom: 0; 
+        right: 0; 
+        cursor: se-resize; 
+        z-index: 10;
+      }
+      .react-resizable-handle::after { 
+        content: ""; 
+        position: absolute; 
+        right: 4px; 
+        bottom: 4px; 
+        width: 8px; 
+        height: 8px; 
+        border-right: 2px solid rgba(255,255,255,0.3); 
+        border-bottom: 2px solid rgba(255,255,255,0.3); 
+      }
+      .grid-card-header { cursor: grab; }
+      .grid-card-header:active { cursor: grabbing; }
     </style>
   <script type="importmap">
 {
@@ -35,7 +72,8 @@
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
     "recharts": "https://esm.sh/recharts@^3.6.0",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.90.1"
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.90.1",
+    "react-grid-layout": "https://esm.sh/react-grid-layout@^1.5.0"
   }
 }
 </script>

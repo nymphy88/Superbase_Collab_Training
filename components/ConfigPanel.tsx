@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { GameConfig } from '../types';
-import { Save, Loader2, RotateCcw, Database, AlertCircle, FileText, ClipboardCheck, Square, XCircle, Info } from 'lucide-react';
+import { Save, Loader2, RotateCcw, Database, AlertCircle, FileText, ClipboardCheck, Square, XCircle, Info, Sparkles, Terminal, ShieldCheck } from 'lucide-react';
 
 interface ConfigPanelProps {
   resumeModelName?: string | null;
@@ -24,6 +24,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResum
   const [loading, setLoading] = useState(false);
   const [copying, setCopying] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [showSqlSetup, setShowSqlSetup] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string; details?: string; isSchemaError?: boolean } | null>(null);
 
   useEffect(() => {
@@ -39,8 +40,8 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResum
 
     setMessage({
       type: 'error',
-      text: isSchemaError ? `${context}: Schema Mismatch` : context,
-      details: errorMsg,
+      text: isSchemaError ? `${context}: Schema Error` : context,
+      details: isSchemaError ? `Required column missing in Supabase. Details: ${errorMsg}` : errorMsg,
       isSchemaError
     });
   };
@@ -51,7 +52,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResum
       const { data, error } = await supabase
         .from('game_configs')
         .select('*')
-        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
         .limit(1)
         .maybeSingle();
 
@@ -68,20 +69,25 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResum
   };
 
   const handleStop = async () => {
-    if (!confirm('Stop training and save model immediately?')) return;
+    if (!confirm('Broadcast STOP command? The trainer will save and shut down.')) return;
     setStopping(true);
     setMessage(null);
     try {
       const { error } = await supabase.from('system_commands').insert([
         { command: 'STOP_TRAINING', processed: false }
       ]);
+      
       if (error) {
-        handleDbError(error, 'Stop Command Failed');
+        handleDbError(error, 'Broadcast Failed');
       } else {
-        setMessage({ type: 'success', text: 'Stop command sent! Saving model now...' });
+        setMessage({ 
+          type: 'success', 
+          text: 'Stop Command Broadcasted!', 
+          details: 'Worker in Colab will detect this command, save the model, and stop properly.' 
+        });
       }
     } catch (err: any) {
-      setMessage({ type: 'error', text: 'Stop failed', details: err.message });
+      setMessage({ type: 'error', text: 'Operation failed', details: err.message });
     } finally {
       setStopping(false);
     }
@@ -90,29 +96,30 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResum
   const generateColabScript = () => {
     const url = 'https://besukzaogasvsefpmsce.supabase.co';
     const key = 'sb_publishable_YuQcGRwxs8XHkLY3ibimLA_q7x6_oRv'; 
-    // Dynamically set RESUME_MODEL based on resumeModelName prop
-    const resumeModel = resumeModelName ? `'${resumeModelName}'` : 'None';
+    const resumeModelValue = resumeModelName ? `'${resumeModelName}'` : "None";
 
     return `
-# Blackjack Dice V8.6 (The Counter Logic) - Colab Worker
-# Generated with Prefix: ddmm_hhmm, Mode: ${resumeModelName ? 'Resume' : 'New Train'}
-# Target Model: ${resumeModelName || 'Fresh Start'}
+# ===================================================================
+# BLACKJACK DICE V8.6 - SUPABASE WORKER SCRIPT
+# ===================================================================
+# Features: Real-time logging, System commands, and Model Resumption
+# ===================================================================
 
 !pip install supabase gymnasium stable-baselines3 shimmy -q
 
-import os
-import time
-import numpy as np
+import os, time, numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 from supabase import create_client, Client
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 
-# --- CONFIG ---
+# --- SUPABASE CONFIG ---
 URL = "${url}"
 KEY = "${key}"
-RESUME_MODEL = ${resumeModel}
+# RESUME_FROM determines if we start fresh or load an existing model
+RESUME_FROM = ${resumeModelValue}
+
 supabase: Client = create_client(URL, KEY)
 
 class BlackjackDiceEnvV86(gym.Env):
@@ -142,21 +149,22 @@ class BlackjackDiceEnvV86(gym.Env):
 
     def step(self, action):
         info = {'counter_triggered': False, 'refilled': False}
-        
-        # Apply Counter Fee if chosen
         if action == 2:
-             self.current_balance -= float(self.cfg['counter_fee'])
-             info['counter_triggered'] = True
-
-        if action == 1: # Hit
-            self.player_sum += self._roll(2)
-            if self.player_sum > 21: return self._end_game(-float(self.cfg['bet_amount']), info)
-        elif action == 2: # Counter
-            if self.player_sum >= 15:
+            if self.player_sum >= 15 and self.counter_available > 0:
+                fee = float(self.cfg.get('counter_fee', 0))
+                self.current_balance -= fee
                 self.counter_enabled = True
-                return self._dealer_turn(info)
-            else: return self._end_game(-float(self.cfg['bet_amount']), info)
-        elif action == 0: # Stay
+                self.counter_available = 0
+                info['counter_triggered'] = True
+                obs, reward, done, trunc, info = self._dealer_turn(info)
+                return obs, (reward - fee), done, trunc, info
+            else:
+                return self._get_obs(), -0.1, False, False, info
+        if action == 1:
+            self.player_sum += self._roll(2)
+            if self.player_sum > 21: 
+                return self._end_game(-float(self.cfg['bet_amount']), info)
+        elif action == 0:
             return self._dealer_turn(info)
         return self._get_obs(), 0.0, False, False, info
 
@@ -180,8 +188,8 @@ class BlackjackDiceEnvV86(gym.Env):
             info['refilled'] = True
         return self._get_obs(), float(reward), True, False, info
 
-class TrainingCallback(BaseCallback):
-    def __init__(self, check_freq=500):
+class TrainingMonitor(BaseCallback):
+    def __init__(self, check_freq=200):
         super().__init__()
         self.check_freq = check_freq
         self.total_profit = 0
@@ -194,91 +202,113 @@ class TrainingCallback(BaseCallback):
         reward = self.locals['rewards'][0]
         info = self.locals['infos'][0]
         
-        self.total_profit -= reward
+        # Round reward to nearest integer before accumulating profit
+        self.total_profit -= int(round(reward))
+        
         if reward > 0: self.wins += 1
         if info.get('counter_triggered'): self.counter_uses += 1
         if info.get('refilled'): self.total_refills += 1
         self.games += 1
 
         if self.n_calls % self.check_freq == 0:
-            self._log_to_supabase()
-            self._check_commands()
+            self._push_telemetry()
+            # If this returns False, training loop stops gracefully
+            return self._listen_for_commands()
         return True
 
-    def _log_to_supabase(self):
+    def _push_telemetry(self):
         try:
+            current_balance = self.training_env.get_attr('current_balance')[0]
             supabase.table("training_logs").insert({
                 "step": self.n_calls,
-                "house_profit": float(self.total_profit),
-                "player_money": float(self.training_env.get_attr('current_balance')[0]),
+                "house_profit": int(self.total_profit), # Send as INT
+                "player_money": int(current_balance),
                 "win_rate": float((self.wins/self.games)*100 if self.games>0 else 0),
                 "counter_usage": float((self.counter_uses/self.games)*100 if self.games>0 else 0),
                 "refill_count": int(self.total_refills)
             }).execute()
-        except: pass
+        except Exception: pass
 
-    def _check_commands(self):
+    def _listen_for_commands(self) -> bool:
         try:
-            res = supabase.table("system_commands").select("*").eq("processed", False).execute()
+            # Fetch all unprocessed commands
+            res = supabase.table("system_commands")\\
+                .select("*")\\
+                .eq("processed", False)\\
+                .order("id", desc=False)\\
+                .execute()
+                
             for cmd in res.data:
-                if cmd['command'] == 'STOP_TRAINING':
-                    print("Stopping signal received...")
-                    save_and_upload(self.model, "stop_manual")
-                    supabase.table("system_commands").update({"processed": True}).eq("id", cmd['id']).execute()
-                    os._exit(0)
-                elif cmd['command'] == 'SAVE_MODEL':
+                action = cmd['command']
+                cmd_id = cmd['id']
+                print(f"\\n[!] EXECUTING: {action}")
+                
+                # Mark as processed immediately
+                supabase.table("system_commands").update({"processed": True}).eq("id", cmd_id).execute()
+
+                if action == 'STOP_TRAINING':
+                    print("[SHUTDOWN] Force stopping...")
+                    save_and_upload(self.model, "manual_stop")
+                    return False # Return False to stop Stable Baselines loop
+                
+                elif action == 'SAVE_MODEL':
                     save_and_upload(self.model, "snapshot")
-                    supabase.table("system_commands").update({"processed": True}).eq("id", cmd['id']).execute()
-        except: pass
+            
+            return True # Continue training
+        except Exception as e:
+            print(f"Listener Error: {e}")
+            return True
 
-def save_and_upload(model, reason):
-    prefix = time.strftime("%d%m_%H%M")
-    filename = f"{prefix}_{reason}.zip"
-    model.save(filename)
+def save_and_upload(model, suffix):
+    fname = f"model_{time.strftime('%H%M')}_{suffix}.zip"
+    model.save(fname)
+    print(f"[*] Model saved locally as {fname}")
     try:
-        with open(filename, "rb") as f:
-            supabase.storage.from_("models").upload(filename, f)
-        print(f"Model saved and uploaded: {filename}")
+        with open(fname, "rb") as f:
+            supabase.storage.from_("models").upload(fname, f)
+        print(f"[SUCCESS] Model uploaded to Supabase Storage: {fname}")
     except Exception as e:
-        print(f"Upload failed: {e}")
+        print(f"[ERROR] Storage Upload Failed: {e}")
 
-def train():
-    print("Fetching latest game config...")
-    cfg_res = supabase.table("game_configs").select("*").order("created_at", desc=True).limit(1).execute()
-    if not cfg_res.data:
-        print("No config found! Please save one in the web app.")
+def start_training():
+    # 1. Fetch latest config
+    res = supabase.table("game_configs").select("*").order("id", desc=True).limit(1).execute()
+    if not res.data:
+        print("[ERROR] No configuration found. Save a config in the Control Center first.")
         return
-    cfg = cfg_res.data[0]
     
+    cfg = res.data[0]
+    print(f"[*] Starting session with Config ID: {cfg['id']}")
+    
+    # 2. Setup Environment
     env = BlackjackDiceEnvV86(cfg)
     
-    if RESUME_MODEL != "None":
-        print(f"Downloading model for resume: {RESUME_MODEL}...")
+    # 3. Handle Resumption Logic
+    if RESUME_FROM and RESUME_FROM != "None":
+        print(f"[*] Attempting to resume from Supabase: {RESUME_FROM}")
         try:
+            model_data = supabase.storage.from_("models").download(RESUME_FROM)
             with open("resume_model.zip", "wb") as f:
-                res = supabase.storage.from_("models").download(RESUME_MODEL)
-                f.write(res)
+                f.write(model_data)
             model = PPO.load("resume_model.zip", env=env)
-            print("Model loaded successfully.")
+            print("[SUCCESS] Model loaded successfully.")
         except Exception as e:
-            print(f"Failed to load model: {e}. Starting fresh.")
-            model = PPO("MlpPolicy", env, verbose=1)
+            print(f"[WARNING] Could not resume model ({e}). Starting fresh instead.")
+            model = PPO("MlpPolicy", env, verbose=0)
     else:
-        print("Starting fresh training session.")
-        model = PPO("MlpPolicy", env, verbose=1)
-
-    try:
-        print(f"Training for {cfg['total_timesteps']} timesteps...")
-        model.learn(total_timesteps=int(cfg['total_timesteps']), callback=TrainingCallback())
-        save_and_upload(model, "final_complete")
-    except KeyboardInterrupt:
-        save_and_upload(model, "interrupt")
-    except Exception as e:
-        print(f"Training error: {e}")
-        save_and_upload(model, "crash_save")
+        print("[*] Starting fresh training (Random Initialization)")
+        model = PPO("MlpPolicy", env, verbose=0)
+    
+    # 4. Begin Learning Loop
+    print(f"[RUNNING] Training for {cfg['total_timesteps']} steps...")
+    model.learn(total_timesteps=int(cfg['total_timesteps']), callback=TrainingMonitor())
+    
+    # 5. Final Save
+    save_and_upload(model, "completed")
+    print("[DONE] Training complete.")
 
 if __name__ == "__main__":
-    train()
+    start_training()
 `.trim();
   };
 
@@ -300,13 +330,13 @@ if __name__ == "__main__":
     try {
       const { error } = await supabase.from('game_configs').insert([data]);
       if (error) {
-        handleDbError(error, 'Save Failed');
+        handleDbError(error, 'Update Failed');
       } else {
-        setMessage({ type: 'success', text: 'Config updated and pushed to Supabase!' });
+        setMessage({ type: 'success', text: 'New configuration active!' });
         fetchLatestConfig();
       }
     } catch (err: any) {
-      setMessage({ type: 'error', text: 'Network Error', details: err.message });
+      setMessage({ type: 'error', text: 'Network error', details: err.message });
     }
     setLoading(false);
   };
@@ -317,17 +347,31 @@ if __name__ == "__main__":
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Database className="w-5 h-5 text-blue-400" />
-            V8.6 Control Panel
+            V8.6 Training Engine
           </h2>
-          {resumeModelName && (
-            <div className="mt-2 flex items-center gap-2 bg-blue-900/40 border border-blue-500/50 px-3 py-1.5 rounded-full text-blue-200 text-xs shadow-lg animate-pulse">
-              <RotateCcw className="w-3 h-3" />
-              Resuming from: <strong>{resumeModelName}</strong>
-              <button onClick={onClearResume} className="hover:text-white ml-1 bg-blue-700/50 p-0.5 rounded-full transition-colors">
-                <XCircle className="w-3 h-3" />
-              </button>
-            </div>
-          )}
+          <div className="flex gap-2 mt-2">
+            {resumeModelName ? (
+              <div className="flex items-center gap-2 bg-blue-900/40 border border-blue-500/50 px-3 py-1.5 rounded-full text-blue-200 text-xs shadow-lg animate-pulse">
+                <RotateCcw className="w-3 h-3" />
+                Resume Mode: <strong>{resumeModelName}</strong>
+                <button onClick={onClearResume} className="hover:text-white ml-1 bg-blue-700/50 p-0.5 rounded-full transition-colors">
+                  <XCircle className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 bg-green-900/40 border border-green-500/50 px-3 py-1.5 rounded-full text-green-200 text-xs shadow-lg">
+                <Sparkles className="w-3 h-3" />
+                Fresh Start Mode
+              </div>
+            )}
+            <button 
+              onClick={() => setShowSqlSetup(!showSqlSetup)}
+              className="flex items-center gap-1.5 bg-gray-900/50 border border-gray-700 px-3 py-1.5 rounded-full text-gray-400 text-xs hover:border-blue-500 hover:text-blue-400 transition-all"
+            >
+              <Terminal className="w-3 h-3" />
+              Environment Info
+            </button>
+          </div>
         </div>
         <div className="flex gap-2">
            <button 
@@ -342,15 +386,31 @@ if __name__ == "__main__":
             className={`flex items-center gap-1.5 text-[10px] font-bold py-1.5 px-3 rounded border transition-all ${copying ? 'bg-green-600 border-green-500 text-white shadow-green-900/20 shadow-lg' : 'bg-gray-900 border-gray-700 text-blue-400 hover:border-blue-500'}`}
           >
             {copying ? <ClipboardCheck className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
-            {copying ? 'COPIED!' : 'COPY SCRIPT'}
+            {copying ? 'SCRIPT COPIED!' : 'GET WORKER SCRIPT'}
           </button>
         </div>
       </div>
 
+      {showSqlSetup && (
+        <div className="mb-6 bg-gray-950 border border-blue-900/50 rounded-lg p-4 font-mono text-xs overflow-hidden group">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-blue-400 flex items-center gap-2">
+              <ShieldCheck className="w-3 h-3" />
+              DATABASE SCHEMA REQUIREMENTS
+            </span>
+          </div>
+          <div className="text-gray-400 space-y-1">
+            <p><strong>game_configs:</strong> Needs id, initial_player_balance, bet_amount, dealer_stand, total_timesteps...</p>
+            <p><strong>training_logs:</strong> Needs step, house_profit, player_money, win_rate, counter_usage...</p>
+            <p><strong>system_commands:</strong> Needs id, command (text), processed (boolean)</p>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSave} className="space-y-4">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="space-y-1">
-            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Timesteps</label>
+            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Training Steps</label>
             <input type="number" name="total_timesteps" value={config.total_timesteps} onChange={handleChange} className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
           </div>
           <div className="space-y-1">
@@ -367,21 +427,6 @@ if __name__ == "__main__":
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-1">
-            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Counter Fee</label>
-            <input type="number" name="counter_fee" value={config.counter_fee} onChange={handleChange} className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Win Payout</label>
-            <input type="number" name="win_payout" value={config.win_payout} onChange={handleChange} className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Counter Bonus</label>
-            <input type="number" name="counter_win_payout" value={config.counter_win_payout} onChange={handleChange} className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
-          </div>
-        </div>
-
         {message && (
           <div className={`p-4 rounded-lg border flex flex-col gap-2 ${message.type === 'success' ? 'bg-green-900/30 border-green-500/50 text-green-200' : 'bg-red-900/30 border-red-500/50 text-red-200'}`}>
             <div className="flex items-start gap-3">
@@ -391,26 +436,16 @@ if __name__ == "__main__":
                 {message.details && <p className="text-xs mt-1 font-mono opacity-80 break-all">{message.details}</p>}
               </div>
             </div>
-            
-            {message.isSchemaError && (
-              <div className="mt-2 p-3 bg-gray-900/60 rounded border border-gray-700/50 text-xs">
-                <div className="flex items-center gap-2 text-blue-400 font-bold mb-1">
-                  <Info className="w-3 h-3" />
-                  Troubleshooting Suggestion
-                </div>
-                <p className="text-gray-300">
-                  It looks like your Supabase table schema doesn't match the application's requirements. 
-                  Please go to the <strong>Supabase SQL Editor</strong> and ensure the <code>game_configs</code> 
-                  table has all required columns.
-                </p>
-              </div>
-            )}
           </div>
         )}
 
-        <button type="submit" disabled={loading} className="w-full flex justify-center items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-all active:scale-[0.98] disabled:opacity-50 shadow-lg shadow-blue-900/20">
+        <button 
+          type="submit" 
+          disabled={loading} 
+          className="w-full flex justify-center items-center gap-2 text-white font-bold py-3 rounded-lg transition-all active:scale-[0.98] disabled:opacity-50 shadow-lg bg-blue-600 hover:bg-blue-500"
+        >
           {loading ? <Loader2 className="animate-spin w-5 h-5" /> : <Save className="w-5 h-5" />}
-          {resumeModelName ? 'Update Config & Resume Model' : 'Save Config & Start Training'}
+          Apply Config & Update Workers
         </button>
       </form>
     </div>
