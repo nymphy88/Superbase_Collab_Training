@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { GameConfig } from '../types';
-import { Save, Loader2, RotateCcw, Database, AlertCircle, FileText, ClipboardCheck, Square, XCircle, Info, Sparkles, Terminal, ShieldCheck } from 'lucide-react';
+import { Save, Loader2, RotateCcw, Database, AlertCircle, FileText, ClipboardCheck, Square, XCircle, Info, Sparkles, Terminal, ShieldCheck, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ConfigPanelProps {
   resumeModelName?: string | null;
@@ -10,13 +10,15 @@ interface ConfigPanelProps {
 }
 
 const DEFAULT_CONFIG: GameConfig = {
-  initial_player_balance: 200000.0,
-  bet_amount: 100.0,
-  counter_fee: 50.0,
-  win_payout: 200.0,
-  counter_win_payout: 350.0,
+  initial_player_balance: 1000.0,
+  bet_amount: 10.0,
+  counter_fee: 5.0,
+  win_payout: 10.0,
+  counter_win_payout: 25.0,
   dealer_stand: 17,
   total_timesteps: 1000000,
+  max_balance_ref: 2000.0,
+  refill_penalty: -50.0,
 };
 
 const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResume }) => {
@@ -69,13 +71,19 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResum
   };
 
   const handleStop = async () => {
-    if (!confirm('Broadcast STOP command? The trainer will save and shut down.')) return;
+    // Removed window.confirm() to prevent sandbox blocking issues
     setStopping(true);
     setMessage(null);
     try {
-      const { error } = await supabase.from('system_commands').insert([
-        { command: 'STOP_TRAINING', processed: false }
-      ]);
+      // STUDIO VERIFIED SNIPPET: Send STOP_TRAINING command
+      const { error } = await supabase
+        .from('system_commands')
+        .insert([
+          { 
+            command: 'STOP_TRAINING', 
+            processed: false 
+          }
+        ]);
       
       if (error) {
         handleDbError(error, 'Broadcast Failed');
@@ -100,9 +108,10 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResum
 
     return `
 # ===================================================================
-# BLACKJACK DICE V8.6 - SUPABASE WORKER SCRIPT
+# BLACKJACK DICE V8.9 (RESUME FIX) - SUPABASE WORKER SCRIPT
 # ===================================================================
-# Features: Real-time logging, System commands, and Model Resumption
+# Features: Real-time logging, System commands, Model Resumption
+# Fix: reset_num_timesteps=False on resume, Continuous Step Counting
 # ===================================================================
 
 !pip install supabase gymnasium stable-baselines3 shimmy -q
@@ -122,7 +131,7 @@ RESUME_FROM = ${resumeModelValue}
 
 supabase: Client = create_client(URL, KEY)
 
-class BlackjackDiceEnvV86(gym.Env):
+class BlackjackDiceEnvV89(gym.Env):
     def __init__(self, config):
         super().__init__()
         self.cfg = config
@@ -135,7 +144,15 @@ class BlackjackDiceEnvV86(gym.Env):
         return sum(np.random.randint(1, 7) for _ in range(count))
 
     def _get_obs(self):
-        return np.array([float(self.player_sum), float(self.dealer_visible), float(self.counter_available), float(self.current_balance)], dtype=np.float32)
+        # Normalize balance (0-1) relative to max_balance_ref
+        max_bal = float(self.cfg.get('max_balance_ref', 2000.0))
+        norm_balance = self.current_balance / max_bal
+        return np.array([
+            float(self.player_sum) / 30.0,    # Normalized Player Sum (approx max 30)
+            float(self.dealer_visible) / 6.0, # Normalized Dealer Visible
+            float(self.counter_available),    # Counter Availability (0 or 1)
+            float(norm_balance)               # Normalized Balance
+        ], dtype=np.float32)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -148,18 +165,26 @@ class BlackjackDiceEnvV86(gym.Env):
         return self._get_obs(), {}
 
     def step(self, action):
-        info = {'counter_triggered': False, 'refilled': False}
+        # Initialize info with money_change tracker (Real Money, not Reward)
+        info = {'counter_triggered': False, 'refilled': False, 'money_change': 0.0}
+        
         if action == 2:
             if self.player_sum >= 15 and self.counter_available > 0:
                 fee = float(self.cfg.get('counter_fee', 0))
                 self.current_balance -= fee
+                # Track the fee as negative money flow
+                info['money_change'] -= fee
+                
                 self.counter_enabled = True
                 self.counter_available = 0
                 info['counter_triggered'] = True
+                
                 obs, reward, done, trunc, info = self._dealer_turn(info)
+                # Return reward (which includes game result) minus fee
                 return obs, (reward - fee), done, trunc, info
             else:
-                return self._get_obs(), -0.1, False, False, info
+                # Invalid move: No money change, just heavy penalty to learn
+                return self._get_obs(), -1.0, True, False, info
         if action == 1:
             self.player_sum += self._roll(2)
             if self.player_sum > 21: 
@@ -171,28 +196,46 @@ class BlackjackDiceEnvV86(gym.Env):
     def _dealer_turn(self, info):
         while self.dealer_sum < self.cfg['dealer_stand']:
             self.dealer_sum += self._roll(1)
+
         if self.dealer_sum > 21 or self.player_sum > self.dealer_sum:
             return self._end_game(float(self.cfg['win_payout']), info)
-        else:
-            if self.counter_enabled:
-                new_sum = self.player_sum + self._roll(1)
-                if new_sum == 21: return self._end_game(float(self.cfg['counter_win_payout']), info)
-                elif self.dealer_sum > 21 or new_sum > self.dealer_sum: return self._end_game(10.0, info)
-                else: return self._end_game(-(float(self.cfg['bet_amount']) * 1.5), info)
-            return self._end_game(-float(self.cfg['bet_amount']), info)
+        
+        if self.counter_enabled:
+            new_sum = self.player_sum + self._roll(1)
+            if new_sum == 21: 
+                payout = float(self.cfg.get('counter_win_payout') or self.cfg.get('counter_payout') or 350.0)
+                return self._end_game(payout, info)
+            elif self.dealer_sum > 21 or new_sum > self.dealer_sum: 
+                return self._end_game(10.0, info)
+            else: 
+                return self._end_game(-(float(self.cfg['bet_amount']) * 1.5), info)
+
+        return self._end_game(-float(self.cfg['bet_amount']), info)
 
     def _end_game(self, reward, info):
-        self.current_balance += reward
+        money_gain_loss = float(reward)
+        self.current_balance += money_gain_loss
+        
+        # KEY FIX: Log the actual financial result BEFORE adding refill penalty
+        # If we came from Action 2 (Counter), money_change might already have -fee
+        if 'money_change' not in info: info['money_change'] = 0.0
+        info['money_change'] += money_gain_loss
+
+        final_reward = money_gain_loss
+
         if self.current_balance < float(self.cfg['bet_amount']):
             self.current_balance = float(self.cfg['initial_player_balance'])
             info['refilled'] = True
-        return self._get_obs(), float(reward), True, False, info
+            # Refill penalty is purely for RL (Education), not Financial
+            final_reward += float(self.cfg.get('refill_penalty', -50.0))
+            
+        return self._get_obs(), final_reward, True, False, info
 
 class TrainingMonitor(BaseCallback):
     def __init__(self, check_freq=200):
         super().__init__()
         self.check_freq = check_freq
-        self.total_profit = 0
+        self.total_profit = 0.0
         self.wins = 0
         self.games = 0
         self.counter_uses = 0
@@ -202,8 +245,10 @@ class TrainingMonitor(BaseCallback):
         reward = self.locals['rewards'][0]
         info = self.locals['infos'][0]
         
-        # Round reward to nearest integer before accumulating profit
-        self.total_profit -= int(round(reward))
+        # KEY FIX: House Profit = -(Player Money Change)
+        # We ignore the RL 'reward' (which has penalties) and look at 'money_change'
+        player_money_change = info.get('money_change', 0.0)
+        self.total_profit -= player_money_change 
         
         if reward > 0: self.wins += 1
         if info.get('counter_triggered'): self.counter_uses += 1
@@ -212,17 +257,17 @@ class TrainingMonitor(BaseCallback):
 
         if self.n_calls % self.check_freq == 0:
             self._push_telemetry()
-            # If this returns False, training loop stops gracefully
             return self._listen_for_commands()
         return True
 
     def _push_telemetry(self):
         try:
             current_balance = self.training_env.get_attr('current_balance')[0]
+            # UPDATED: Use self.num_timesteps for continuous step counting when resuming
             supabase.table("training_logs").insert({
-                "step": self.n_calls,
-                "house_profit": int(self.total_profit), # Send as INT
-                "player_money": int(current_balance),
+                "step": self.num_timesteps,
+                "house_profit": float(self.total_profit), 
+                "player_money": float(current_balance),    
                 "win_rate": float((self.wins/self.games)*100 if self.games>0 else 0),
                 "counter_usage": float((self.counter_uses/self.games)*100 if self.games>0 else 0),
                 "refill_count": int(self.total_refills)
@@ -231,7 +276,6 @@ class TrainingMonitor(BaseCallback):
 
     def _listen_for_commands(self) -> bool:
         try:
-            # Fetch all unprocessed commands
             res = supabase.table("system_commands")\\
                 .select("*")\\
                 .eq("processed", False)\\
@@ -243,18 +287,17 @@ class TrainingMonitor(BaseCallback):
                 cmd_id = cmd['id']
                 print(f"\\n[!] EXECUTING: {action}")
                 
-                # Mark as processed immediately
                 supabase.table("system_commands").update({"processed": True}).eq("id", cmd_id).execute()
 
                 if action == 'STOP_TRAINING':
                     print("[SHUTDOWN] Force stopping...")
                     save_and_upload(self.model, "manual_stop")
-                    return False # Return False to stop Stable Baselines loop
+                    return False 
                 
                 elif action == 'SAVE_MODEL':
                     save_and_upload(self.model, "snapshot")
             
-            return True # Continue training
+            return True 
         except Exception as e:
             print(f"Listener Error: {e}")
             return True
@@ -271,7 +314,6 @@ def save_and_upload(model, suffix):
         print(f"[ERROR] Storage Upload Failed: {e}")
 
 def start_training():
-    # 1. Fetch latest config
     res = supabase.table("game_configs").select("*").order("id", desc=True).limit(1).execute()
     if not res.data:
         print("[ERROR] No configuration found. Save a config in the Control Center first.")
@@ -280,10 +322,10 @@ def start_training():
     cfg = res.data[0]
     print(f"[*] Starting session with Config ID: {cfg['id']}")
     
-    # 2. Setup Environment
-    env = BlackjackDiceEnvV86(cfg)
+    env = BlackjackDiceEnvV89(cfg)
     
-    # 3. Handle Resumption Logic
+    reset_timesteps = True
+    
     if RESUME_FROM and RESUME_FROM != "None":
         print(f"[*] Attempting to resume from Supabase: {RESUME_FROM}")
         try:
@@ -292,18 +334,20 @@ def start_training():
                 f.write(model_data)
             model = PPO.load("resume_model.zip", env=env)
             print("[SUCCESS] Model loaded successfully.")
+            reset_timesteps = False
         except Exception as e:
             print(f"[WARNING] Could not resume model ({e}). Starting fresh instead.")
             model = PPO("MlpPolicy", env, verbose=0)
+            reset_timesteps = True
     else:
         print("[*] Starting fresh training (Random Initialization)")
         model = PPO("MlpPolicy", env, verbose=0)
+        reset_timesteps = True
     
-    # 4. Begin Learning Loop
     print(f"[RUNNING] Training for {cfg['total_timesteps']} steps...")
-    model.learn(total_timesteps=int(cfg['total_timesteps']), callback=TrainingMonitor())
+    # PASS reset_num_timesteps=reset_timesteps to control step counting logic
+    model.learn(total_timesteps=int(cfg['total_timesteps']), callback=TrainingMonitor(), reset_num_timesteps=reset_timesteps)
     
-    # 5. Final Save
     save_and_upload(model, "completed")
     print("[DONE] Training complete.")
 
@@ -343,35 +387,12 @@ if __name__ == "__main__":
 
   return (
     <div className="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
-      <div className="flex justify-between items-start mb-6">
+      <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Database className="w-5 h-5 text-blue-400" />
-            V8.6 Training Engine
+            V8.9 Training Engine
           </h2>
-          <div className="flex gap-2 mt-2">
-            {resumeModelName ? (
-              <div className="flex items-center gap-2 bg-blue-900/40 border border-blue-500/50 px-3 py-1.5 rounded-full text-blue-200 text-xs shadow-lg animate-pulse">
-                <RotateCcw className="w-3 h-3" />
-                Resume Mode: <strong>{resumeModelName}</strong>
-                <button onClick={onClearResume} className="hover:text-white ml-1 bg-blue-700/50 p-0.5 rounded-full transition-colors">
-                  <XCircle className="w-3 h-3" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 bg-green-900/40 border border-green-500/50 px-3 py-1.5 rounded-full text-green-200 text-xs shadow-lg">
-                <Sparkles className="w-3 h-3" />
-                Fresh Start Mode
-              </div>
-            )}
-            <button 
-              onClick={() => setShowSqlSetup(!showSqlSetup)}
-              className="flex items-center gap-1.5 bg-gray-900/50 border border-gray-700 px-3 py-1.5 rounded-full text-gray-400 text-xs hover:border-blue-500 hover:text-blue-400 transition-all"
-            >
-              <Terminal className="w-3 h-3" />
-              Environment Info
-            </button>
-          </div>
         </div>
         <div className="flex gap-2">
            <button 
@@ -379,7 +400,7 @@ if __name__ == "__main__":
             className="flex items-center gap-1.5 text-[10px] font-bold py-1.5 px-3 rounded bg-red-900/40 border border-red-700 text-red-400 hover:bg-red-900 transition-all disabled:opacity-50"
           >
             {stopping ? <Loader2 className="animate-spin w-3 h-3" /> : <Square className="w-3 h-3 fill-current" />}
-            STOP & SAVE
+            {stopping ? 'STOPPING...' : 'STOP & SAVE'}
           </button>
            <button 
             type="button" onClick={handleCopyCode}
@@ -390,22 +411,6 @@ if __name__ == "__main__":
           </button>
         </div>
       </div>
-
-      {showSqlSetup && (
-        <div className="mb-6 bg-gray-950 border border-blue-900/50 rounded-lg p-4 font-mono text-xs overflow-hidden group">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-blue-400 flex items-center gap-2">
-              <ShieldCheck className="w-3 h-3" />
-              DATABASE SCHEMA REQUIREMENTS
-            </span>
-          </div>
-          <div className="text-gray-400 space-y-1">
-            <p><strong>game_configs:</strong> Needs id, initial_player_balance, bet_amount, dealer_stand, total_timesteps...</p>
-            <p><strong>training_logs:</strong> Needs step, house_profit, player_money, win_rate, counter_usage...</p>
-            <p><strong>system_commands:</strong> Needs id, command (text), processed (boolean)</p>
-          </div>
-        </div>
-      )}
 
       <form onSubmit={handleSave} className="space-y-4">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -424,6 +429,26 @@ if __name__ == "__main__":
           <div className="space-y-1">
             <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Dealer Stand</label>
             <input type="number" name="dealer_stand" value={config.dealer_stand} onChange={handleChange} className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Win Payout</label>
+            <input type="number" name="win_payout" value={config.win_payout} onChange={handleChange} className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Counter Fee</label>
+            <input type="number" name="counter_fee" value={config.counter_fee} onChange={handleChange} className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Counter Payout</label>
+            <input type="number" name="counter_win_payout" value={config.counter_win_payout} onChange={handleChange} className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Max Bal Ref</label>
+            <input type="number" name="max_balance_ref" value={config.max_balance_ref || 2000} onChange={handleChange} className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Refill Penalty</label>
+            <input type="number" name="refill_penalty" value={config.refill_penalty || -50} onChange={handleChange} className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
           </div>
         </div>
 
@@ -448,6 +473,90 @@ if __name__ == "__main__":
           Apply Config & Update Workers
         </button>
       </form>
+
+      {/* New Footer Section for Session Status and Info */}
+      <div className="mt-6 pt-4 border-t border-gray-700">
+        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+            
+            {/* Session Status & Actions */}
+            <div className="flex items-center gap-3 w-full md:w-auto">
+                {resumeModelName ? (
+                  <div className="flex-1 md:flex-none flex items-center justify-between md:justify-start gap-2 bg-blue-900/40 border border-blue-500/50 px-3 py-2 rounded-lg text-blue-200 text-xs shadow-lg">
+                    <div className="flex items-center gap-2">
+                        <RotateCcw className="w-3 h-3" />
+                        <span className="truncate max-w-[150px] md:max-w-xs">Resume: <strong>{resumeModelName}</strong></span>
+                    </div>
+                    <button onClick={onClearResume} className="hover:text-white bg-blue-700/50 p-1 rounded-full transition-colors" title="Clear Resume Mode">
+                      <XCircle className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex-1 md:flex-none flex items-center gap-2 bg-green-900/40 border border-green-500/50 px-3 py-2 rounded-lg text-green-200 text-xs shadow-lg">
+                    <Sparkles className="w-3 h-3" />
+                    Fresh Start Mode
+                  </div>
+                )}
+                
+                <button 
+                  onClick={onClearResume}
+                  className="whitespace-nowrap flex items-center gap-1.5 bg-purple-900/50 border border-purple-700 px-3 py-2 rounded-lg text-purple-300 text-xs hover:border-purple-500 hover:text-purple-200 transition-all font-semibold"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Start New
+                </button>
+            </div>
+
+            {/* Environment Info Toggle */}
+             <button 
+              onClick={() => setShowSqlSetup(!showSqlSetup)}
+              className={`w-full md:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-all border ${showSqlSetup ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-900/50 border-gray-700 text-gray-400 hover:border-blue-500 hover:text-blue-400'}`}
+            >
+              <Terminal className="w-3 h-3" />
+              Environment Info
+              {showSqlSetup ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+        </div>
+      </div>
+
+      {showSqlSetup && (
+        <div className="mt-4 bg-gray-950 border border-blue-900/50 rounded-lg p-4 font-mono text-xs overflow-hidden group space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-blue-400 flex items-center gap-2">
+                <ShieldCheck className="w-3 h-3" />
+                DATABASE SCHEMA REQUIREMENTS
+              </span>
+            </div>
+            <div className="text-gray-400 space-y-1">
+              <p><strong>game_configs:</strong> Needs id, initial_player_balance, bet_amount, dealer_stand, total_timesteps...</p>
+              <p className="text-blue-400"><strong>[New]</strong> max_balance_ref, refill_penalty, counter_fee, counter_win_payout</p>
+              <p><strong>training_logs:</strong> Needs step, house_profit, player_money, win_rate, counter_usage...</p>
+              <p><strong>system_commands:</strong> Needs id, command (text), processed (boolean)</p>
+            </div>
+          </div>
+          
+          <div className="pt-3 border-t border-gray-800/50">
+             <span className="text-orange-400 flex items-center gap-2 mb-2 font-bold">
+                <AlertCircle className="w-3 h-3" />
+                FIX: SECURITY DEFINER WARNING
+              </span>
+              <div className="flex items-center justify-between bg-black/30 p-2 rounded border border-orange-900/30">
+                <code className="text-orange-200/70 truncate mr-2">ALTER FUNCTION public.system_commands_broadcast_trigger() SET search_path = public;</code>
+                 <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText("ALTER FUNCTION public.system_commands_broadcast_trigger() SET search_path = public;");
+                    alert("SQL Copied!");
+                  }}
+                  className="text-orange-400 hover:text-white transition-colors"
+                  title="Copy SQL Fix"
+                >
+                  <ClipboardCheck className="w-4 h-4" />
+                </button>
+              </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

@@ -11,6 +11,8 @@ export interface GameConfig {
   counter_win_payout: number;
   dealer_stand: number;
   total_timesteps: number;
+  max_balance_ref?: number;
+  refill_penalty?: number;
 }
 
 export interface TrainingLog {

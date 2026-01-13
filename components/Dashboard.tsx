@@ -8,6 +8,8 @@ import StatCard from './StatCard';
 import { Responsive, WidthProvider } from 'react-grid-layout';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
+// BUMP VERSION TO RESET LAYOUT FOR USER
+const STORAGE_KEY = 'dashboard_layout_v2_stable';
 
 const Dashboard: React.FC = () => {
   const [logs, setLogs] = useState<TrainingLog[]>([]);
@@ -28,7 +30,24 @@ const Dashboard: React.FC = () => {
     ]
   };
 
-  const [layouts, setLayouts] = useState(initialLayouts);
+  const [layouts, setLayouts] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : initialLayouts;
+    } catch (e) {
+      return initialLayouts;
+    }
+  });
+
+  const onLayoutChange = useCallback((currentLayout: any, allLayouts: any) => {
+    setLayouts(allLayouts);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(allLayouts));
+  }, []);
+
+  const resetLayout = () => {
+    setLayouts(initialLayouts);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(initialLayouts));
+  };
 
   useEffect(() => {
     // 1. Fetch initial history
@@ -63,7 +82,7 @@ const Dashboard: React.FC = () => {
       )
       .subscribe();
 
-    // 3. Subscribe to System Command Broadcasts (New Trigger logic)
+    // 3. Subscribe to System Command Broadcasts
     const commandChannel = supabase
       .channel('system_commands')
       .on('broadcast', { event: '*' }, (payload) => {
@@ -82,8 +101,6 @@ const Dashboard: React.FC = () => {
       supabase.removeChannel(commandChannel);
     };
   }, []);
-
-  const resetLayout = () => setLayouts(initialLayouts);
 
   const latest = logs.length > 0 ? logs[logs.length - 1] : null;
 
@@ -121,13 +138,13 @@ const Dashboard: React.FC = () => {
         cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
         rowHeight={30}
         draggableHandle=".grid-card-header"
-        onLayoutChange={(currentLayout, allLayouts) => setLayouts(allLayouts)}
+        onLayoutChange={onLayoutChange}
       >
         {/* Stats Section */}
         <div key="stats-profit">
           <StatCard 
             title="House Profit" 
-            value={latest ? latest.house_profit.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '0'} 
+            value={latest ? Math.floor(latest.house_profit).toLocaleString() : '0'} 
             icon={<DollarSign className="text-yellow-400 w-5 h-5" />}
             color="text-yellow-400"
           />
@@ -166,13 +183,16 @@ const Dashboard: React.FC = () => {
             </h3>
             <GripVertical className="w-4 h-4 text-gray-600 hover:text-gray-400 transition-colors" />
           </div>
-          <div className="flex-1 p-4">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="flex-1 p-4 min-h-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <LineChart data={logs}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="step" stroke="#9ca3af" tickFormatter={(val) => `${val/1000}k`} hide={false} />
-                <YAxis stroke="#9ca3af" width={40} />
-                <Tooltip contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', color: '#fff' }} />
+                <YAxis stroke="#9ca3af" width={40} tickFormatter={(val) => Math.floor(val).toLocaleString()} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', color: '#fff' }} 
+                  formatter={(value: number) => [Math.floor(value).toLocaleString(), "Profit"]}
+                />
                 <Line type="monotone" dataKey="house_profit" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
@@ -188,8 +208,8 @@ const Dashboard: React.FC = () => {
             </h3>
             <GripVertical className="w-4 h-4 text-gray-600 hover:text-gray-400 transition-colors" />
           </div>
-          <div className="flex-1 p-4">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="flex-1 p-4 min-h-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <LineChart data={logs}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="step" stroke="#9ca3af" tickFormatter={(val) => `${val/1000}k`} />
@@ -212,13 +232,13 @@ const Dashboard: React.FC = () => {
             </h3>
             <GripVertical className="w-4 h-4 text-gray-600 hover:text-gray-400 transition-colors" />
           </div>
-          <div className="flex-1 p-4">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="flex-1 p-4 min-h-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <LineChart data={logs}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="step" stroke="#9ca3af" tickFormatter={(val) => `${val/1000}k`} />
-                <YAxis stroke="#9ca3af" width={50} />
-                <Tooltip contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', color: '#fff' }} />
+                <YAxis stroke="#9ca3af" width={50} tickFormatter={(val) => Math.floor(val).toLocaleString()} />
+                <Tooltip contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', color: '#fff' }} formatter={(val: number) => Math.floor(val).toLocaleString()} />
                 <Line type="monotone" dataKey="player_money" stroke="#10b981" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
@@ -250,7 +270,7 @@ const Dashboard: React.FC = () => {
                     <td className="px-4 py-1.5 opacity-60 font-mono">{new Date(log.created_at).toLocaleTimeString([], { hour12: false })}</td>
                     <td className="px-4 py-1.5 text-right font-mono">{(log.step/1000).toFixed(1)}k</td>
                     <td className={`px-4 py-1.5 text-right font-bold ${log.house_profit > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {log.house_profit > 0 ? '+' : ''}{log.house_profit.toLocaleString()}
+                      {log.house_profit > 0 ? '+' : ''}{Math.floor(log.house_profit).toLocaleString()}
                     </td>
                     <td className="px-4 py-1.5 text-right font-mono">{log.win_rate.toFixed(1)}%</td>
                   </tr>
@@ -271,3 +291,4 @@ const Dashboard: React.FC = () => {
 };
 
 export default Dashboard;
+    
