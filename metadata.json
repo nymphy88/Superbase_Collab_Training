@@ -1,0 +1,5 @@
+{
+  "name": "AI Training Control Center",
+  "description": "A real-time dashboard to configure reinforcement learning parameters, monitor Google Colab training logs, and visualize performance metrics via Supabase.",
+  "requestFramePermissions": []
+}
