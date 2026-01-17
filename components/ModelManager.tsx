@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { ModelFile } from '../types';
-import { Download, Package, UploadCloud, Loader2, RefreshCw, Trash2, Clock, Database, PlusCircle, CheckCircle2, FileArchive, XCircle } from 'lucide-react';
+import { Download, Package, UploadCloud, Loader2, RefreshCw, Trash2, Clock, Database, PlusCircle, CheckCircle2, FileArchive, XCircle, ChevronRight, CheckSquare, Square } from 'lucide-react';
 
 interface ModelManagerProps {
   onSelectResume: (name: string | null) => void;
@@ -13,7 +13,8 @@ const ModelManager: React.FC<ModelManagerProps> = ({ onSelectResume, selectedMod
   const [models, setModels] = useState<ModelFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [selectedForBulk, setSelectedForBulk] = useState<Set<string>>(new Set());
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
 
   useEffect(() => {
     fetchModels();
@@ -45,6 +46,18 @@ const ModelManager: React.FC<ModelManagerProps> = ({ onSelectResume, selectedMod
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const toggleBulkSelect = (name: string) => {
+    const next = new Set(selectedForBulk);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    setSelectedForBulk(next);
+  };
+
+  const selectAll = () => {
+    if (selectedForBulk.size === models.length) setSelectedForBulk(new Set());
+    else setSelectedForBulk(new Set(models.map(m => m.name)));
+  };
+
   const triggerSnapshot = async () => {
     setActionLoading(true);
     try {
@@ -57,23 +70,32 @@ const ModelManager: React.FC<ModelManagerProps> = ({ onSelectResume, selectedMod
         }
       ]);
       if (error) throw error;
-      alert('Snapshot command sent!');
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      alert('Command failed: ' + err.message);
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleDelete = async (name: string) => {
+  const handleBulkDelete = async () => {
+    setActionLoading(true);
     try {
-      const { error } = await supabase.storage.from('models').remove([name]);
+      const filesToDelete = Array.from(selectedForBulk);
+      const { error } = await supabase.storage.from('models').remove(filesToDelete);
+      
       if (error) throw error;
-      if (selectedModel === name) onSelectResume(null);
-      setDeleteConfirm(null);
-      fetchModels();
+
+      if (selectedModel && filesToDelete.includes(selectedModel)) {
+        onSelectResume(null);
+      }
+      
+      setSelectedForBulk(new Set());
+      setBulkDeleteConfirm(false);
+      await fetchModels();
     } catch (err: any) {
       alert('Delete failed: ' + err.message);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -85,7 +107,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ onSelectResume, selectedMod
       <div className="flex justify-between items-center mb-5">
         <h2 className="text-lg font-bold text-white flex items-center gap-2">
           <Package className="w-5 h-5 text-purple-400" />
-          Models
+          Checkpoint Repository
         </h2>
         <div className="flex gap-2">
           <button 
@@ -98,104 +120,129 @@ const ModelManager: React.FC<ModelManagerProps> = ({ onSelectResume, selectedMod
           <button
             onClick={triggerSnapshot}
             disabled={actionLoading}
-            className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold uppercase py-1.5 px-3 rounded-md transition-all disabled:opacity-50"
+            className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold uppercase py-1.5 px-3 rounded-md transition-all disabled:opacity-50 shadow-lg shadow-purple-900/20"
           >
             {actionLoading ? <Loader2 className="animate-spin w-3 h-3" /> : <UploadCloud className="w-3 h-3" />}
-            Snapshot
+            Instant Snap
           </button>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col gap-4">
-        {/* 1. Fresh Start Button */}
+      <div className="flex-1 flex flex-col gap-3 min-h-0">
+        {/* Fresh Start Toggle */}
         <button
           onClick={() => onSelectResume(null)}
-          className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all ${
+          className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${
             selectedModel === null 
-              ? 'bg-green-900/20 border-green-500 ring-1 ring-green-500/50' 
-              : 'bg-gray-700/30 border-gray-700 hover:bg-gray-700'
+              ? 'bg-green-900/20 border-green-500/50 ring-1 ring-green-500/30' 
+              : 'bg-gray-900/40 border-gray-700 hover:bg-gray-700/50'
           }`}
         >
           <div className="flex items-center gap-3">
-            <div className={`p-1.5 rounded-full ${selectedModel === null ? 'bg-green-500 text-white' : 'bg-gray-600 text-gray-400'}`}>
+            <div className={`p-2 rounded-lg ${selectedModel === null ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-500'}`}>
                <PlusCircle className="w-4 h-4" />
             </div>
             <div className="text-left">
-              <span className={`block text-xs font-bold ${selectedModel === null ? 'text-white' : 'text-gray-300'}`}>Start Fresh</span>
-              <span className="block text-[10px] text-gray-500">Random weights</span>
+              <span className={`block text-xs font-black uppercase tracking-wider ${selectedModel === null ? 'text-green-400' : 'text-gray-400'}`}>Fresh Init</span>
+              <span className="block text-[9px] text-gray-600 font-bold uppercase tracking-widest mt-0.5">Random Seed Weights</span>
             </div>
           </div>
           {selectedModel === null && <CheckCircle2 className="w-4 h-4 text-green-500" />}
         </button>
 
-        <div className="flex items-center gap-3 px-1 opacity-50">
-           <div className="h-px bg-gray-600 flex-1"></div>
-           <span className="text-[10px] uppercase font-bold text-gray-500">OR RESUME</span>
-           <div className="h-px bg-gray-600 flex-1"></div>
+        <div className="flex items-center gap-3 px-2">
+           <span className="text-[9px] uppercase font-black text-gray-600 tracking-[0.2em] whitespace-nowrap">Saved History</span>
+           <div className="h-px bg-gray-700 flex-1"></div>
+           {models.length > 0 && (
+             <button onClick={selectAll} className="text-[9px] font-black text-blue-500 hover:text-blue-400 uppercase tracking-widest">
+               {selectedForBulk.size === models.length ? 'Clear' : 'All'}
+             </button>
+           )}
         </div>
 
-        {/* 2. Native Select Dropdown (Bulletproof for overflows) */}
-        <div className="relative">
-          <FileArchive className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
-          <select
-            value={selectedModel || ""}
-            onChange={(e) => onSelectResume(e.target.value || null)}
-            className="w-full bg-gray-900 border border-gray-600 text-gray-200 text-xs rounded-lg pl-9 pr-3 py-2.5 outline-none focus:border-blue-500 appearance-none cursor-pointer hover:border-gray-500 transition-colors truncate"
-          >
-            <option value="">-- Select a Checkpoint --</option>
-            {models.map((m) => (
-              <option key={m.id} value={m.name}>
-                {m.name} ({formatFileSize(m.metadata?.size)})
-              </option>
-            ))}
-          </select>
-          <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-gray-500">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-          </div>
-        </div>
-
-        {/* 3. Selected Model Info Panel */}
-        {selectedModelData && (
-          <div className="mt-auto bg-gray-900/50 border border-blue-900/30 rounded-lg p-3 animate-in fade-in slide-in-from-bottom-2">
-            <div className="flex items-start gap-3 mb-3">
-               <div className="p-2 bg-blue-500/10 rounded border border-blue-500/20">
-                  <Database className="w-4 h-4 text-blue-400" />
-               </div>
-               <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-white truncate" title={selectedModelData.name}>{selectedModelData.name}</p>
-                  <div className="flex items-center gap-2 text-[10px] text-gray-500 mt-1">
-                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(selectedModelData.created_at).toLocaleDateString()}</span>
-                    <span>•</span>
-                    <span>{formatFileSize(selectedModelData.metadata?.size)}</span>
-                  </div>
-               </div>
+        {/* Model List with Selection - Constrained height for 4-5 visible items */}
+        <div className="overflow-y-auto space-y-2 pr-1 max-h-[260px] scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+          {models.length === 0 && !loading && (
+            <div className="flex flex-col items-center justify-center h-full text-center p-6 bg-gray-900/20 border border-dashed border-gray-700 rounded-xl">
+               <FileArchive className="w-8 h-8 text-gray-700 mb-2" />
+               <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">No models archived</p>
             </div>
+          )}
+          
+          {models.map((m) => {
+            const isSelectedForResume = selectedModel === m.name;
+            const isSelectedForAction = selectedForBulk.has(m.name);
+            
+            return (
+              <div 
+                key={m.id}
+                className={`flex items-center gap-3 p-2 rounded-lg border transition-all group ${
+                  isSelectedForResume 
+                    ? 'bg-blue-900/20 border-blue-500/50' 
+                    : 'bg-gray-900/40 border-gray-800 hover:border-gray-600'
+                }`}
+              >
+                <button 
+                  onClick={() => toggleBulkSelect(m.name)}
+                  className={`p-1 rounded transition-colors ${isSelectedForAction ? 'text-blue-500' : 'text-gray-700 hover:text-gray-500'}`}
+                >
+                  {isSelectedForAction ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                </button>
+                
+                <button 
+                  onClick={() => onSelectResume(m.name)}
+                  className="flex-1 min-w-0 flex items-center gap-3 text-left"
+                >
+                  <div className={`p-1.5 rounded-md ${isSelectedForResume ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-500 group-hover:bg-gray-700'}`}>
+                    <Database className="w-3 h-3" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className={`text-[11px] font-bold truncate ${isSelectedForResume ? 'text-blue-300' : 'text-gray-300'}`}>{m.name}</p>
+                    <div className="flex items-center gap-2 text-[9px] text-gray-600 font-mono mt-0.5">
+                      <span>{formatFileSize(m.metadata?.size)}</span>
+                      <span>•</span>
+                      <span>{new Date(m.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </button>
+                
+                {isSelectedForResume && <ChevronRight className="w-3 h-3 text-blue-500 mr-1" />}
+              </div>
+            );
+          })}
+        </div>
 
-            {/* Inline Delete Confirmation or Actions */}
-            {deleteConfirm === selectedModelData.name ? (
-              <div className="bg-red-900/20 border border-red-900/50 rounded p-2 flex items-center justify-between gap-2">
-                <span className="text-[10px] font-bold text-red-400">Confirm Delete?</span>
-                <div className="flex gap-2">
-                   <button onClick={() => setDeleteConfirm(null)} className="text-[10px] text-gray-400 hover:text-white px-2 py-1 bg-gray-800 rounded">Cancel</button>
-                   <button onClick={() => handleDelete(selectedModelData.name)} className="text-[10px] text-white bg-red-600 hover:bg-red-500 px-2 py-1 rounded font-bold">Yes, Delete</button>
-                </div>
+        {/* Bulk Actions Footer */}
+        {selectedForBulk.size > 0 && (
+          <div className="pt-3 border-t border-gray-700 animate-in fade-in slide-in-from-bottom-3 duration-200">
+            {bulkDeleteConfirm ? (
+              <div className="bg-red-900/20 border border-red-900/50 rounded-xl p-3 flex flex-col gap-3">
+                 <p className="text-[10px] font-black text-red-400 uppercase tracking-widest text-center">Delete {selectedForBulk.size} items permanently?</p>
+                 <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => setBulkDeleteConfirm(false)} className="py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-[10px] font-black uppercase text-gray-400 transition-colors">Cancel</button>
+                    <button onClick={handleBulkDelete} disabled={actionLoading} className="py-2 bg-red-600 hover:bg-red-500 rounded-lg text-[10px] font-black uppercase text-white shadow-lg transition-all flex items-center justify-center">
+                       {actionLoading ? <Loader2 className="animate-spin w-3 h-3" /> : 'Confirm Destroy'}
+                    </button>
+                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={() => setBulkDeleteConfirm(true)}
+                  className="flex items-center justify-center gap-2 py-2.5 bg-red-900/10 hover:bg-red-900/30 border border-red-900/30 text-red-500 rounded-xl text-[10px] font-black uppercase transition-all"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete ({selectedForBulk.size})
+                </button>
                 <a 
-                  href={supabase.storage.from('models').getPublicUrl(selectedModelData.name).data.publicUrl}
+                  href={selectedModelData ? supabase.storage.from('models').getPublicUrl(selectedModelData.name).data.publicUrl : '#'}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-1.5 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-[10px] font-bold text-gray-300 transition-colors"
+                  className={`flex items-center justify-center gap-2 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-xl text-[10px] font-black uppercase text-gray-300 transition-all ${!selectedModel ? 'opacity-50 pointer-events-none' : ''}`}
                 >
-                  <Download className="w-3 h-3" /> Download
+                  <Download className="w-3.5 h-3.5" />
+                  Download
                 </a>
-                <button 
-                  onClick={() => setDeleteConfirm(selectedModelData.name)}
-                  className="flex items-center justify-center gap-1.5 py-1.5 bg-red-900/10 hover:bg-red-900/30 border border-red-900/30 text-red-400 hover:text-red-300 rounded text-[10px] font-bold transition-colors"
-                >
-                  <Trash2 className="w-3 h-3" /> Delete
-                </button>
               </div>
             )}
           </div>
@@ -206,4 +253,3 @@ const ModelManager: React.FC<ModelManagerProps> = ({ onSelectResume, selectedMod
 };
 
 export default ModelManager;
-    
