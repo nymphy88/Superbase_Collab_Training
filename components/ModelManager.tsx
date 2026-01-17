@@ -238,7 +238,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ onSelectResume, selectedMod
                   href={selectedModelData ? supabase.storage.from('models').getPublicUrl(selectedModelData.name).data.publicUrl : '#'}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`flex items-center justify-center gap-2 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-xl text-[10px] font-black uppercase text-gray-300 transition-all ${!selectedModel ? 'opacity-50 pointer-events-none' : ''}`}
+                  className={`flex items-center justify-center gap-2 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-xl text-[10px] font-black uppercase text-gray-300 transition-all ${!selectedModelData ? 'opacity-50 pointer-events-none' : ''}`}
                 >
                   <Download className="w-3.5 h-3.5" />
                   Download
