@@ -50,3 +50,17 @@ export interface StatCardProps {
   trend?: 'up' | 'down' | 'neutral';
   color?: string;
 }
+
+export interface DiagnosticLog {
+  timestamp: string;
+  type: 'INFO' | 'CMD' | 'DATA' | 'ERROR' | 'SUCCESS';
+  message: string;
+  payload?: any;
+}
+
+export interface ConnectionStatus {
+  supabase: 'ONLINE' | 'OFFLINE' | 'PENDING';
+  realtime: 'CONNECTED' | 'DISCONNECTED' | 'JOINING';
+  storage: 'READY' | 'ERROR' | 'CHECKING';
+  tables: 'SYNCED' | 'ERROR' | 'CHECKING';
+}

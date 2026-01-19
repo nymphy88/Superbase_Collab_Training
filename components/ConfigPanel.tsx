@@ -77,8 +77,10 @@ export default function ConfigPanel({ resumeModelName, onClearResume }: ConfigPa
   };
 
   const copyWorkerScript = () => {
-    const url = import.meta.env?.VITE_SUPABASE_URL || "YOUR_SUPABASE_URL";
-    const key = import.meta.env?.VITE_SUPABASE_ANON_KEY || "YOUR_SUPABASE_ANON_KEY";
+    // 🟢 แก้ไข: เปลี่ยนมาใช้ process.env แทน import.meta.env เนื่องจากข้อผิดพลาด Property 'env' does not exist on type 'ImportMeta'
+    // และเพื่อให้สอดคล้องกับ supabaseClient.ts
+    const url = process.env.REACT_APP_SUPABASE_URL || "https://besukzaogasvsefpmsce.supabase.co";
+    const key = process.env.REACT_APP_SUPABASE_ANON_KEY || "sb_publishable_YuQcGRwxs8XHkLY3ibimLA_q7x6_oRv";
     
     // 🐍 โค้ดชุดนี้คือ "เครื่องยนต์" ที่จะไปรันใน Colab
     const pythonCode = `# QuantumWaste AI - Evolutionary Worker

@@ -3,14 +3,15 @@ import React, { useState } from 'react';
 import ConfigPanel from './components/ConfigPanel';
 import Dashboard from './components/Dashboard';
 import ModelManager from './components/ModelManager';
-import { Cpu, ChevronUp, ChevronDown, Settings2, LayoutDashboard, PanelTop, Maximize2, Minimize2 } from 'lucide-react';
+import DiagnosticsPanel from './components/DiagnosticsPanel';
+import { Cpu, ChevronUp, ChevronDown, Settings2, LayoutDashboard, Maximize2, Minimize2 } from 'lucide-react';
 
 const App: React.FC = () => {
   const [resumeModelName, setResumeModelName] = useState<string | null>(null);
   const [isControlsExpanded, setIsControlsExpanded] = useState(true);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 font-sans selection:bg-blue-500/30">
+    <div className="min-h-screen bg-gray-900 text-gray-100 font-sans selection:bg-blue-500/30 pb-16">
       {/* Navbar */}
       <nav className="border-b border-gray-800 bg-gray-900/95 backdrop-blur sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -93,11 +94,20 @@ const App: React.FC = () => {
         </section>
 
       </main>
-      
+
+      {/* Footer / Status Bar */}
+      <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 text-center border-t border-gray-800/30 mt-12 mb-20">
+        <div className="flex flex-col items-center gap-4">
+          <p className="text-[10px] text-gray-600 font-mono uppercase tracking-[0.2em]">
+            QuantumWaste AI Systems • Project Blackjack Dice • V8.6.0
+          </p>
+        </div>
+      </footer>
+
       {/* Floating Action Toggle for quick access when collapsed */}
       <button 
         onClick={() => setIsControlsExpanded(true)}
-        className={`fixed bottom-8 right-8 p-4 rounded-full shadow-2xl z-50 transition-all duration-500 transform hover:scale-110 active:scale-95 flex items-center gap-3 font-bold ${
+        className={`fixed bottom-14 right-8 p-4 rounded-full shadow-2xl z-50 transition-all duration-500 transform hover:scale-110 active:scale-95 flex items-center gap-3 font-bold ${
           isControlsExpanded 
             ? 'bg-gray-800 text-gray-400 border border-gray-700 translate-y-24 opacity-0 pointer-events-none' 
             : 'bg-blue-600 text-white shadow-blue-900/60 translate-y-0 opacity-100'
@@ -107,14 +117,8 @@ const App: React.FC = () => {
         <span className="text-sm pr-2 tracking-wide uppercase">Open Control Panel</span>
       </button>
 
-      {/* Footer / Status Bar */}
-      <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 text-center border-t border-gray-800/30 mt-12">
-        <div className="flex flex-col items-center gap-4">
-          <p className="text-[10px] text-gray-600 font-mono uppercase tracking-[0.2em]">
-            QuantumWaste AI Systems • Project Blackjack Dice • V8.6.0
-          </p>
-        </div>
-      </footer>
+      {/* System Diagnostics HUD - The Engine Room */}
+      <DiagnosticsPanel />
     </div>
   );
 };
