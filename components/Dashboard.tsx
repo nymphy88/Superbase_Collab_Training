@@ -25,10 +25,10 @@ const INITIAL_LAYOUTS = {
     { i: 'stats-winrate', x: 4, y: 0, w: 2, h: 2 },
     { i: 'stats-counter', x: 6, y: 0, w: 2, h: 2 },
     { i: 'stats-refills', x: 8, y: 0, w: 2, h: 2 },
-    { i: 'chart-house', x: 0, y: 2, w: 6, h: 8 },
-    { i: 'chart-winrate', x: 6, y: 2, w: 6, h: 8 },
-    { i: 'chart-player', x: 0, y: 10, w: 12, h: 8 },
-    { i: 'table-logs', x: 0, y: 18, w: 12, h: 8 },
+    { i: 'chart-house', x: 0, y: 2, w: 5, h: 8 },
+    { i: 'chart-winrate', x: 5, y: 2, w: 5, h: 8 },
+    { i: 'chart-player', x: 0, y: 10, w: 5, h: 8 },
+    { i: 'table-logs', x: 5, y: 10, w: 5, h: 8 },
   ],
 };
 
