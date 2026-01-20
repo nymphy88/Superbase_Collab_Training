@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { ConfigPanel, Dashboard, ModelManager, DiagnosticsPanel } from './components/index';
 import { Cpu, ChevronUp, ChevronDown, Settings2, LayoutDashboard, Maximize2, Minimize2 } from 'lucide-react';

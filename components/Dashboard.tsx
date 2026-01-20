@@ -1,17 +1,18 @@
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import { TrainingLog } from '../types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, DollarSign, Activity, GripVertical, RotateCcw, User } from 'lucide-react';
 import StatCard from './StatCard';
+// Fix: Use the suggested import pattern for react-grid-layout to avoid named export issues
 import { Responsive, WidthProvider } from 'react-grid-layout';
 
-// Standard named imports from react-grid-layout
+// Stable HOC outside the component prevents unmounting/re-mounting loops
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
-const CONFIG = {
-  STORAGE_KEY: 'dashboard_layout_v4_pro',
+const DASH_CONFIG = {
+  STORAGE_KEY: 'dashboard_layout_v7_stable',
   DATA_LIMIT: 60,
   BREAKPOINTS: { lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 },
   COLS: { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 },
@@ -25,36 +26,47 @@ const INITIAL_LAYOUTS = {
     { i: 'stats-winrate', x: 4, y: 0, w: 2, h: 2 },
     { i: 'stats-counter', x: 6, y: 0, w: 2, h: 2 },
     { i: 'stats-refills', x: 8, y: 0, w: 2, h: 2 },
-    { i: 'chart-house', x: 0, y: 2, w: 5, h: 8 },
-    { i: 'chart-winrate', x: 5, y: 2, w: 5, h: 8 },
-    { i: 'chart-player', x: 0, y: 10, w: 5, h: 8 },
-    { i: 'table-logs', x: 5, y: 10, w: 5, h: 8 },
+    { i: 'chart-house', x: 0, y: 2, w: 6, h: 8 },
+    { i: 'chart-winrate', x: 6, y: 2, w: 6, h: 8 },
+    { i: 'chart-player', x: 0, y: 10, w: 6, h: 8 },
+    { i: 'table-logs', x: 6, y: 10, w: 6, h: 8 },
   ],
 };
 
 const Dashboard: React.FC = () => {
   const [logs, setLogs] = useState<TrainingLog[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const layoutRef = useRef<any>(null);
 
   const [layouts, setLayouts] = useState(() => {
     try {
-      const saved = localStorage.getItem(CONFIG.STORAGE_KEY);
-      return saved ? JSON.parse(saved) : INITIAL_LAYOUTS;
+      const saved = localStorage.getItem(DASH_CONFIG.STORAGE_KEY);
+      const parsed = saved ? JSON.parse(saved) : INITIAL_LAYOUTS;
+      layoutRef.current = parsed;
+      return parsed;
     } catch (e) {
+      layoutRef.current = INITIAL_LAYOUTS;
       return INITIAL_LAYOUTS;
     }
   });
 
+  const memoizedLayouts = useMemo(() => layouts, [layouts]);
+
   const onLayoutChange = useCallback((currentLayout: any, allLayouts: any) => {
-    // Only update state if something actually changed to avoid loops
-    // react-grid-layout can sometimes fire onLayoutChange during re-renders with minor fractional differences
-    setLayouts(allLayouts);
-    localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(allLayouts));
+    const newLayoutStr = JSON.stringify(allLayouts);
+    const oldLayoutStr = JSON.stringify(layoutRef.current);
+    
+    if (newLayoutStr !== oldLayoutStr) {
+      layoutRef.current = allLayouts;
+      setLayouts(allLayouts);
+      localStorage.setItem(DASH_CONFIG.STORAGE_KEY, newLayoutStr);
+    }
   }, []);
 
   const resetLayout = useCallback(() => {
+    layoutRef.current = INITIAL_LAYOUTS;
     setLayouts(INITIAL_LAYOUTS);
-    localStorage.removeItem(CONFIG.STORAGE_KEY);
+    localStorage.removeItem(DASH_CONFIG.STORAGE_KEY);
   }, []);
 
   useEffect(() => {
@@ -63,35 +75,22 @@ const Dashboard: React.FC = () => {
         .from('training_logs')
         .select('*')
         .order('id', { ascending: false })
-        .limit(CONFIG.DATA_LIMIT);
+        .limit(DASH_CONFIG.DATA_LIMIT);
 
-      if (data) {
-        setLogs(data.reverse());
-      }
+      if (data) setLogs(data.reverse());
     };
 
     fetchInitial();
 
     const logsChannel = supabase
       .channel('logs-realtime-feed')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'training_logs' },
-        (payload) => {
-          const newLog = payload.new as TrainingLog;
-          setLogs((prev) => {
-            const updated = [...prev, newLog];
-            return updated.slice(-CONFIG.DATA_LIMIT);
-          });
-        }
-      )
-      .subscribe((status) => {
-        setIsConnected(status === 'SUBSCRIBED');
-      });
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'training_logs' }, (payload) => {
+        const newLog = payload.new as TrainingLog;
+        setLogs((prev) => [...prev.slice(-(DASH_CONFIG.DATA_LIMIT - 1)), newLog]);
+      })
+      .subscribe((status) => setIsConnected(status === 'SUBSCRIBED'));
 
-    return () => {
-      supabase.removeChannel(logsChannel);
-    };
+    return () => { supabase.removeChannel(logsChannel); };
   }, []);
 
   const latest = useMemo(() => logs.length > 0 ? logs[logs.length - 1] : null, [logs]);
@@ -121,59 +120,35 @@ const Dashboard: React.FC = () => {
 
       <ResponsiveGridLayout
         className="layout"
-        layouts={layouts}
-        breakpoints={CONFIG.BREAKPOINTS}
-        cols={CONFIG.COLS}
-        rowHeight={CONFIG.ROW_HEIGHT}
+        layouts={memoizedLayouts}
+        breakpoints={DASH_CONFIG.BREAKPOINTS}
+        cols={DASH_CONFIG.COLS}
+        rowHeight={DASH_CONFIG.ROW_HEIGHT}
         draggableHandle=".grid-card-header"
         onLayoutChange={onLayoutChange}
         margin={[12, 12]}
         useCSSTransforms={true}
       >
         <div key="stats-house-profit">
-          <StatCard
-            title="House Net Profit"
-            value={latest ? Math.floor(latest.house_profit).toLocaleString() : '0'}
-            icon={<DollarSign className="text-yellow-400 w-4 h-4" />}
-            color="text-yellow-400"
-          />
+          <StatCard title="House Net Profit" value={latest ? Math.floor(latest.house_profit).toLocaleString() : '0'} icon={<DollarSign className="text-yellow-400 w-4 h-4" />} color="text-yellow-400" />
         </div>
         <div key="stats-player-profit">
-          <StatCard
-            title="Player Net Profit"
-            value={playerNetProfit ? Math.floor(playerNetProfit).toLocaleString() : '0'}
-            icon={<User className="text-emerald-400 w-4 h-4" />}
-            color="text-emerald-400"
-          />
+          <StatCard title="Player Net Profit" value={playerNetProfit ? Math.floor(playerNetProfit).toLocaleString() : '0'} icon={<User className="text-emerald-400 w-4 h-4" />} color="text-emerald-400" />
         </div>
         <div key="stats-winrate">
           <div className="h-full w-full bg-blue-900/10 border border-blue-500/30 rounded-xl p-3 flex items-center justify-between group grid-card-header hover:bg-blue-900/20 transition-all cursor-grab active:cursor-grabbing">
             <div className="pointer-events-none">
               <p className="text-blue-400/60 text-[9px] uppercase font-black tracking-widest">Win Rate</p>
-              <h3 className="text-xl font-black mt-0.5 text-blue-300 tracking-tighter tabular-nums">
-                {latest ? `${latest.win_rate.toFixed(1)}%` : '0%'}
-              </h3>
+              <h3 className="text-xl font-black mt-0.5 text-blue-300 tracking-tighter tabular-nums">{latest ? `${latest.win_rate.toFixed(1)}%` : '0%'}</h3>
             </div>
-            <div className="bg-blue-500/20 p-2 rounded-lg border border-blue-500/30">
-              <TrendingUp className="text-blue-400 w-5 h-5" />
-            </div>
+            <div className="bg-blue-500/20 p-2 rounded-lg border border-blue-500/30"><TrendingUp className="text-blue-400 w-5 h-5" /></div>
           </div>
         </div>
         <div key="stats-refills">
-          <StatCard
-            title="Bankrupt Refills"
-            value={latest ? latest.refill_count : 0}
-            icon={<RotateCcw className="text-red-400 w-4 h-4" />}
-            color="text-red-400"
-          />
+          <StatCard title="Bankrupt Refills" value={latest ? latest.refill_count : 0} icon={<RotateCcw className="text-red-400 w-4 h-4" />} color="text-red-400" />
         </div>
         <div key="stats-counter">
-          <StatCard
-            title="Counter Triggered"
-            value={latest ? `${latest.counter_usage.toFixed(1)}%` : '0%'}
-            icon={<Activity className="text-purple-400 w-4 h-4" />}
-            color="text-purple-400"
-          />
+          <StatCard title="Counter Triggered" value={latest ? `${latest.counter_usage.toFixed(1)}%` : '0%'} icon={<Activity className="text-purple-400 w-4 h-4" />} color="text-purple-400" />
         </div>
 
         <div key="chart-house" className="bg-gray-800 rounded-xl border border-gray-700 shadow-xl flex flex-col overflow-hidden group">
@@ -196,7 +171,7 @@ const Dashboard: React.FC = () => {
 
         <div key="chart-winrate" className="bg-gray-800 rounded-xl border border-gray-700 shadow-xl flex flex-col overflow-hidden group">
           <div className="grid-card-header flex items-center justify-between p-2.5 border-b border-gray-700 bg-gray-900/20 cursor-grab active:cursor-grabbing">
-            <h3 className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Win Efficiency</h3>
+            <h3 className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Win Rate Trend</h3>
             <GripVertical className="w-4 h-4 text-gray-700 group-hover:text-gray-500 transition-colors" />
           </div>
           <div className="flex-1 p-4 min-h-0">
@@ -204,7 +179,7 @@ const Dashboard: React.FC = () => {
               <LineChart data={logs}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
                 <XAxis dataKey="step" hide />
-                <YAxis stroke="#4b5563" fontSize={10} width={40} domain={[0, 100]} />
+                <YAxis stroke="#4b5563" fontSize={10} width={40} tickFormatter={(val) => `${val}%`} />
                 <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', fontSize: '11px' }} />
                 <Line type="monotone" dataKey="win_rate" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
@@ -214,7 +189,7 @@ const Dashboard: React.FC = () => {
 
         <div key="chart-player" className="bg-gray-800 rounded-xl border border-gray-700 shadow-xl flex flex-col overflow-hidden group">
           <div className="grid-card-header flex items-center justify-between p-2.5 border-b border-gray-700 bg-gray-900/20 cursor-grab active:cursor-grabbing">
-            <h3 className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Player Liquidity</h3>
+            <h3 className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Player Money</h3>
             <GripVertical className="w-4 h-4 text-gray-700 group-hover:text-gray-500 transition-colors" />
           </div>
           <div className="flex-1 p-4 min-h-0">
@@ -232,30 +207,30 @@ const Dashboard: React.FC = () => {
 
         <div key="table-logs" className="bg-gray-800 rounded-xl border border-gray-700 shadow-xl flex flex-col overflow-hidden group">
           <div className="grid-card-header flex items-center justify-between p-2.5 border-b border-gray-700 bg-gray-900/20 cursor-grab active:cursor-grabbing">
-            <h3 className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Real-time Data Stream</h3>
+            <h3 className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Data Stream</h3>
             <GripVertical className="w-4 h-4 text-gray-700 group-hover:text-gray-500 transition-colors" />
           </div>
-          <div className="flex-1 overflow-auto p-2 custom-scrollbar">
-             <table className="w-full text-left text-[10px] text-gray-400">
-                <thead>
-                  <tr className="border-b border-gray-700 sticky top-0 bg-gray-900 z-10">
-                    <th className="p-2">Step</th>
-                    <th className="p-2">Profit</th>
-                    <th className="p-2">Win %</th>
+          <div className="flex-1 overflow-auto custom-scrollbar">
+            <table className="w-full text-[10px] text-left">
+              <thead className="sticky top-0 bg-gray-900 text-gray-500 uppercase font-black text-[8px] tracking-wider border-b border-gray-700">
+                <tr>
+                  <th className="px-3 py-2">Step</th>
+                  <th className="px-3 py-2">Profit</th>
+                  <th className="px-3 py-2">WR %</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-700/50">
+                {[...logs].reverse().slice(0, 15).map((log) => (
+                  <tr key={log.id} className="hover:bg-gray-700/30 transition-colors">
+                    <td className="px-3 py-2 font-mono text-gray-400">{log.step.toLocaleString()}</td>
+                    <td className={`px-3 py-2 font-bold ${log.house_profit >= 0 ? 'text-yellow-500' : 'text-red-400'}`}>
+                      ${Math.floor(log.house_profit).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 text-blue-400">{log.win_rate.toFixed(1)}%</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {[...logs].reverse().map((log, idx) => (
-                    <tr key={idx} className="border-b border-gray-800/50 hover:bg-gray-700/30 transition-colors">
-                      <td className="p-2 tabular-nums">{log.step}</td>
-                      <td className={`p-2 font-bold ${log.house_profit >= 0 ? 'text-yellow-500' : 'text-red-500'}`}>
-                        {log.house_profit.toFixed(2)}
-                      </td>
-                      <td className="p-2 text-blue-400 tabular-nums">{log.win_rate.toFixed(1)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-             </table>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </ResponsiveGridLayout>
@@ -263,4 +238,4 @@ const Dashboard: React.FC = () => {
   );
 };
 
-export default React.memo(Dashboard);
+export default Dashboard;

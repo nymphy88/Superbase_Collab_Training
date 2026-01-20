@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { GameConfig } from '../../../types';
+import { GameConfig } from '../types';
 import { DEFAULT_CONFIG } from '../config.types';
 import { configService } from '../config.service';
 

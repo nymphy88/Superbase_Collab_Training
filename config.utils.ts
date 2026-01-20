@@ -1,8 +1,8 @@
-import { GameConfig } from '../../types';
+import { GameConfig } from './types';
 
 export const generatePythonWorker = (formConfig: GameConfig, activeConfigId: string | number | undefined) => {
-  const url = process.env.REACT_APP_SUPABASE_URL || "https://besukzaogasvsefpmsce.supabase.co";
-  const key = process.env.REACT_APP_SUPABASE_ANON_KEY || "sb_publishable_YuQcGRwxs8XHkLY3ibimLA_q7x6_oRv";
+  const url = "https://besukzaogasvsefpmsce.supabase.co";
+  const key = "sb_publishable_YuQcGRwxs8XHkLY3ibimLA_q7x6_oRv";
   
   return `# QuantumWaste AI - Evolutionary Worker
 import os, time, json

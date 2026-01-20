@@ -1,9 +1,11 @@
 import React, { useCallback, useMemo } from 'react';
-import { Database, CheckCircle2, RefreshCw, PlayCircle, History, FileText, Activity } from 'lucide-react';
-import { ConfigInput, ConfigStatItem } from './components/index';
+import { Database, RefreshCw, PlayCircle, History, FileText, Activity, CheckCircle2 } from 'lucide-react';
 import { useConfigPanelState } from './hooks/useConfigPanelState';
 import { generatePythonWorker } from './config.utils';
 import { ConfigPanelProps, DEFAULT_CONFIG } from './config.types';
+
+// Importing from the main barrel file in components/ as requested for architectural consistency
+import { ConfigInput, ConfigStatItem } from '../index';
 
 const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResume }) => {
   const {
@@ -36,12 +38,20 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResum
   ], [activeConfig]);
 
   return (
-    <div className="bg-[#1e293b] rounded-lg overflow-hidden border border-gray-700">
+    <div className="bg-[#1e293b] rounded-lg overflow-hidden border border-gray-700 shadow-xl">
       <div className="grid grid-cols-2">
-        <button onClick={handleReload} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-4 flex items-center justify-center gap-2 uppercase tracking-widest text-[10px] border-r border-white/10 transition-all">
+        <button 
+          onClick={handleReload} 
+          disabled={loading}
+          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black py-4 flex items-center justify-center gap-2 uppercase tracking-widest text-[10px] border-r border-white/10 transition-all"
+        >
           <History className="w-4 h-4" /> RELOAD CONFIG
         </button>
-        <button onClick={handleStart} className="bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 flex items-center justify-center gap-2 uppercase tracking-widest text-[10px] transition-all">
+        <button 
+          onClick={handleStart} 
+          disabled={loading}
+          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black py-4 flex items-center justify-center gap-2 uppercase tracking-widest text-[10px] transition-all"
+        >
           <PlayCircle className="w-4 h-4" /> START NEW SESSION
         </button>
       </div>
@@ -79,13 +89,16 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResum
           ))}
         </div>
 
-        <button onClick={copyWorkerScript} className="w-full flex items-center justify-center gap-2 text-[9px] font-black py-3 rounded bg-gray-900 border border-gray-800 text-blue-400 uppercase tracking-widest hover:border-blue-500 transition-all">
-          {copying ? <CheckCircle2 className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+        <button 
+          onClick={copyWorkerScript} 
+          className="w-full flex items-center justify-center gap-2 text-[9px] font-black py-3 rounded bg-gray-900 border border-gray-800 text-blue-400 uppercase tracking-widest hover:border-blue-500 transition-all group"
+        >
+          {copying ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <FileText className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />}
           {copying ? 'COPIED PYTHON WORKER' : 'BOOTSTRAP TO COLAB'}
         </button>
 
         {message && (
-          <div className={`p-2.5 rounded text-[10px] font-black uppercase flex items-center gap-2 ${message.type === 'success' ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
+          <div className={`p-2.5 rounded text-[10px] font-black uppercase flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300 ${message.type === 'success' ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
             <Activity className="w-3 h-3" /> {message.text}
           </div>
         )}
