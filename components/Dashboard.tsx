@@ -1,13 +1,13 @@
-import React, { useEffect, useState, useCallback } from 'react';
+
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { TrainingLog } from '../types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, DollarSign, Activity, GripVertical, RotateCcw, User } from 'lucide-react';
 import StatCard from './StatCard';
-import * as RGL from 'react-grid-layout';
+import { Responsive, WidthProvider } from 'react-grid-layout';
 
-// Robustly extract components to avoid TypeError in ESM environments
-const { Responsive, WidthProvider } = RGL;
+// Standard named imports from react-grid-layout
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
 const CONFIG = {
@@ -46,14 +46,16 @@ const Dashboard: React.FC = () => {
   });
 
   const onLayoutChange = useCallback((currentLayout: any, allLayouts: any) => {
+    // Only update state if something actually changed to avoid loops
+    // react-grid-layout can sometimes fire onLayoutChange during re-renders with minor fractional differences
     setLayouts(allLayouts);
     localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(allLayouts));
   }, []);
 
-  const resetLayout = () => {
+  const resetLayout = useCallback(() => {
     setLayouts(INITIAL_LAYOUTS);
     localStorage.removeItem(CONFIG.STORAGE_KEY);
-  };
+  }, []);
 
   useEffect(() => {
     const fetchInitial = async () => {
@@ -92,8 +94,8 @@ const Dashboard: React.FC = () => {
     };
   }, []);
 
-  const latest = logs.length > 0 ? logs[logs.length - 1] : null;
-  const playerNetProfit = latest ? -latest.house_profit : 0;
+  const latest = useMemo(() => logs.length > 0 ? logs[logs.length - 1] : null, [logs]);
+  const playerNetProfit = useMemo(() => latest ? -latest.house_profit : 0, [latest]);
 
   return (
     <div className="space-y-6 p-2">
@@ -126,6 +128,7 @@ const Dashboard: React.FC = () => {
         draggableHandle=".grid-card-header"
         onLayoutChange={onLayoutChange}
         margin={[12, 12]}
+        useCSSTransforms={true}
       >
         <div key="stats-house-profit">
           <StatCard
@@ -260,4 +263,4 @@ const Dashboard: React.FC = () => {
   );
 };
 
-export default Dashboard;
+export default React.memo(Dashboard);

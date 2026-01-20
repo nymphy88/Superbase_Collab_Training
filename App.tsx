@@ -1,9 +1,6 @@
 
 import React, { useState } from 'react';
-import ConfigPanel from './components/ConfigPanel';
-import Dashboard from './components/Dashboard';
-import ModelManager from './components/ModelManager';
-import DiagnosticsPanel from './components/DiagnosticsPanel';
+import { ConfigPanel, Dashboard, ModelManager, DiagnosticsPanel } from './components/index';
 import { Cpu, ChevronUp, ChevronDown, Settings2, LayoutDashboard, Maximize2, Minimize2 } from 'lucide-react';
 
 const App: React.FC = () => {

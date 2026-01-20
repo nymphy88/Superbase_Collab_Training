@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { GameConfig } from '../types';
 import { Database, CheckCircle2, RefreshCw, PlayCircle, History, FileText, Activity } from 'lucide-react';
+import { ConfigInput, ConfigStatItem } from './index';
 
 interface ConfigPanelProps {
   resumeModelName?: string | null;
@@ -20,17 +22,14 @@ const DEFAULT_CONFIG: GameConfig = {
   refill_penalty: -500.0,
 };
 
-// 🟢 แก้ไข: ใช้ export default โดยตรงเพื่อแก้ SyntaxError
-export default function ConfigPanel({ resumeModelName, onClearResume }: ConfigPanelProps) {
+const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResume }) => {
   const [activeConfig, setActiveConfig] = useState<any>(null);
   const [formConfig, setFormConfig] = useState<GameConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(false);
   const [copying, setCopying] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  useEffect(() => { fetchLatestConfig(true); }, []);
-
-  const fetchLatestConfig = async (syncForm: boolean = false) => {
+  const fetchLatestConfig = useCallback(async (syncForm: boolean = false) => {
     setLoading(true);
     try {
       const { data } = await supabase.from('game_configs').select('*').order('id', { ascending: false }).limit(1).maybeSingle();
@@ -39,9 +38,11 @@ export default function ConfigPanel({ resumeModelName, onClearResume }: ConfigPa
         if (syncForm) setFormConfig(data);
       }
     } finally { setLoading(false); }
-  };
+  }, []);
 
-  const handleReload = async () => {
+  useEffect(() => { fetchLatestConfig(true); }, [fetchLatestConfig]);
+
+  const handleReload = useCallback(async () => {
     setLoading(true);
     try {
       const { id, created_at, ...newVersionData } = formConfig as any;
@@ -56,9 +57,9 @@ export default function ConfigPanel({ resumeModelName, onClearResume }: ConfigPa
       setMessage({ type: 'success', text: `v${data.id} Reloaded & Deployed` });
     } catch (err: any) { setMessage({ type: 'error', text: err.message }); }
     finally { setLoading(false); }
-  };
+  }, [formConfig]);
 
-  const handleStart = async () => {
+  const handleStart = useCallback(async () => {
     setLoading(true);
     try {
       if (onClearResume) onClearResume();
@@ -74,15 +75,12 @@ export default function ConfigPanel({ resumeModelName, onClearResume }: ConfigPa
       setMessage({ type: 'success', text: `v${data.id} Fresh Session Started` });
     } catch (err: any) { setMessage({ type: 'error', text: err.message }); }
     finally { setLoading(false); }
-  };
+  }, [formConfig, onClearResume]);
 
-  const copyWorkerScript = () => {
-    // 🟢 แก้ไข: เปลี่ยนมาใช้ process.env แทน import.meta.env เนื่องจากข้อผิดพลาด Property 'env' does not exist on type 'ImportMeta'
-    // และเพื่อให้สอดคล้องกับ supabaseClient.ts
+  const copyWorkerScript = useCallback(() => {
     const url = process.env.REACT_APP_SUPABASE_URL || "https://besukzaogasvsefpmsce.supabase.co";
     const key = process.env.REACT_APP_SUPABASE_ANON_KEY || "sb_publishable_YuQcGRwxs8XHkLY3ibimLA_q7x6_oRv";
     
-    // 🐍 โค้ดชุดนี้คือ "เครื่องยนต์" ที่จะไปรันใน Colab
     const pythonCode = `# QuantumWaste AI - Evolutionary Worker
 import os, time, json
 try:
@@ -114,7 +112,20 @@ while True:
     navigator.clipboard.writeText(pythonCode);
     setCopying(true);
     setTimeout(() => setCopying(false), 2000);
-  };
+  }, [formConfig, activeConfig]);
+
+  const statCells = useMemo(() => [
+    { label: 'BET', value: activeConfig?.bet_amount },
+    { label: 'STAND', value: activeConfig?.dealer_stand },
+    { label: 'WIN', value: activeConfig?.win_payout },
+    { label: 'FEE', value: activeConfig?.counter_fee },
+    { label: 'REF', value: activeConfig?.max_balance_ref },
+    { label: 'STEP', value: activeConfig?.total_timesteps ? (activeConfig.total_timesteps/1000).toFixed(0)+'k' : '--' }
+  ], [activeConfig]);
+
+  const handleInputChange = useCallback((key: string, val: number) => {
+    setFormConfig(prev => ({ ...prev, [key]: val }));
+  }, []);
 
   return (
     <div className="bg-[#1e293b] rounded-lg overflow-hidden border border-gray-700">
@@ -134,7 +145,6 @@ while True:
               <Database className="w-4 h-4 text-blue-400 mt-1" />
               <div>
                 <h2 className="text-[11px] font-black text-blue-400 uppercase tracking-widest">SYSTEM GATEWAY</h2>
-                {/* 🔴 แก้ไข: ใช้ created_at และ ?. เพื่อกัน TypeError */}
                 <p className="text-[8px] font-mono text-gray-500 mt-1 uppercase">ACTIVE ID: <span className="text-blue-300">v{activeConfig?.id || '---'}</span></p>
                 <p className="text-[7px] font-mono text-gray-600">{activeConfig?.created_at ? new Date(activeConfig.created_at).toLocaleString() : 'WAITING FOR DATA...'}</p>
               </div>
@@ -143,29 +153,21 @@ while True:
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
-          {/* Mini Dashboard 6 cells */}
           <div className="grid grid-cols-6 gap-2">
-            {[ {l:'BET', v:activeConfig?.bet_amount}, {l:'STAND', v:activeConfig?.dealer_stand}, {l:'WIN', v:activeConfig?.win_payout}, {l:'FEE', v:activeConfig?.counter_fee}, {l:'REF', v:activeConfig?.max_balance_ref}, {l:'STEP', v:activeConfig?.total_timesteps ? (activeConfig.total_timesteps/1000).toFixed(0)+'k' : '--'} ].map((s,i)=>(
-              <div key={i} className="bg-gray-900 border border-gray-800 p-2 text-center rounded">
-                <p className="text-[7px] font-black text-gray-600 uppercase mb-1">{s.l}</p>
-                <p className="text-[10px] font-mono text-blue-300">{s.v ?? 0}</p>
-              </div>
+            {statCells.map((s, i) => (
+              <ConfigStatItem key={i} label={s.label} value={s.value} />
             ))}
           </div>
         </div>
 
-        {/* Workbench */}
         <div className="grid grid-cols-3 gap-3">
           {Object.keys(DEFAULT_CONFIG).map((k) => (
-            <div key={k} className="flex flex-col gap-1">
-              <label className="text-[7px] font-black text-gray-500 uppercase tracking-tighter">{k.replace(/_/g,' ')}</label>
-              <input 
-                type="number" 
-                value={(formConfig as any)[k]} 
-                onChange={(e) => setFormConfig({...formConfig, [k]: parseFloat(e.target.value) || 0})}
-                className="bg-gray-900 border border-gray-800 rounded px-2 py-2 text-[11px] text-white font-mono focus:border-blue-500 outline-none"
-              />
-            </div>
+            <ConfigInput 
+              key={k} 
+              label={k.replace(/_/g,' ')} 
+              value={(formConfig as any)[k]} 
+              onChange={(val) => handleInputChange(k, val)} 
+            />
           ))}
         </div>
 
@@ -182,4 +184,6 @@ while True:
       </div>
     </div>
   );
-}
+};
+
+export default React.memo(ConfigPanel);
