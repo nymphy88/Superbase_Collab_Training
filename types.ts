@@ -53,7 +53,7 @@ export interface StatCardProps {
 
 export interface DiagnosticLog {
   timestamp: string;
-  type: 'INFO' | 'CMD' | 'DATA' | 'ERROR' | 'SUCCESS';
+  type: 'INFO' | 'CMD' | 'DATA' | 'ERROR' | 'SUCCESS' | 'WARN' | 'DEBUG';
   message: string;
   payload?: any;
 }
