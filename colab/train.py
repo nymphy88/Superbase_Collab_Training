@@ -1,103 +1,93 @@
-# QuantumWaste AI - Blackjack Dice Training Worker v8.6
+
+# QuantumWaste AI - Evolutionary Training Worker v9.0
+# This script handles real-time signals and graceful termination.
+
 import os
 import time
+import threading
+import subprocess
+import traceback
+import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-import numpy as np
+from datetime import datetime
+
+# --- STEP 1: Dependency Management ---
+def install_dependencies():
+    required = ["supabase", "stable-baselines3", "shimmy", "gymnasium", "flask", "flask-cors"]
+    try:
+        installed = subprocess.check_output(["pip", "freeze"]).decode("utf-8")
+        for lib in required:
+            if lib not in installed:
+                print(f"📦 Installing {lib}...")
+                subprocess.run(["pip", "install", lib, "-q"], check=True)
+    except Exception as e:
+        print(f"⚠️ Dependency check failed: {e}")
+
+install_dependencies()
+
+# --- STEP 2: Imports & Initialization ---
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from supabase import create_client
 
-# 1. เชื่อมต่อ Supabase
+# Supabase Credentials
 URL = "https://besukzaogasvsefpmsce.supabase.co"
-KEY = "sb_publishable_YuQcGRwxs8XHkLY3ibimLA_q7x6_oRv" # Replace with Service Role Key in production Colab
+KEY = "sb_publishable_YuQcGRwxs8XHkLY3ibimLA_q7x6_oRv" 
 supabase = create_client(URL, KEY)
 
-class DashboardCallback(BaseCallback):
-    """
-    SB3 Callback for real-time telemetry syncing and command listening.
-    """
-    def __init__(self, env, verbose=0):
-        super(DashboardCallback, self).__init__(verbose)
-        self.training_env_ref = env
-        self.last_sync_step = 0
-        self.sync_freq = 100
-        self.should_stop = False
+# Global control flags
+training_flags = {"stop": False, "active": False, "config_id": None}
 
-    def _on_step(self) -> bool:
-        # Check commands every 10 steps to save bandwidth
-        if self.num_timesteps % 10 == 0:
-            self._check_remote_commands()
-            if self.should_stop:
-                print("🛑 STOP command received from Dashboard.")
-                return False
+# --- STEP 3: Flask Control Server ---
+app = Flask(__name__)
+CORS(app)
 
-        # Sync telemetry every sync_freq steps
-        if self.num_timesteps - self.last_sync_step >= self.sync_freq:
-            self._sync_telemetry()
-            self.last_sync_step = self.num_timesteps
-        
-        return True
+@app.route('/start', methods=['POST'])
+def handle_start():
+    data = request.json
+    config_id = data.get('config_id')
+    print(f"\n📡 [SIGNAL] Start Triggered: {config_id}")
+    training_flags['active'] = True
+    training_flags['stop'] = False
+    training_flags['config_id'] = config_id
+    return jsonify({"status": "starting"}), 200
 
-    def _sync_telemetry(self):
-        env = self.training_env_ref
-        win_rate = (env.wins / max(1, env.steps)) * 100
-        counter_usage = (env.counter_hits / max(1, env.steps)) * 100
-        
-        data = {
-            "step": self.num_timesteps,
-            "house_profit": float(env.house_profit),
-            "player_money": float(env.player_money),
-            "win_rate": float(win_rate),
-            "counter_usage": float(counter_usage),
-            "refill_count": int(env.refill_count)
-        }
-        try:
-            supabase.table("training_logs").insert(data).execute()
-        except Exception as e:
-            print(f"⚠️ Telemetry Sync Error: {e}")
+@app.route('/stop', methods=['POST'])
+def handle_stop():
+    print(f"\n🛑 [SIGNAL] Stop Triggered")
+    training_flags['stop'] = True
+    return jsonify({"status": "stopping"}), 200
 
-    def _check_remote_commands(self):
-        try:
-            res = supabase.table("system_commands")\
-                .select("*")\
-                .eq("processed", False)\
-                .order("id", desc=True)\
-                .limit(1)\
-                .execute()
-            
-            if res.data:
-                cmd_item = res.data[0]
-                cmd = cmd_item.get('command')
-                
-                if cmd == 'STOP_TRAINING':
-                    self.should_stop = True
-                elif cmd == 'SAVE_MODEL':
-                    # Handle save model manually here or just acknowledge
-                    print("💾 Dashboard requested model save...")
-                
-                # Mark as processed
-                supabase.table("system_commands")\
-                    .update({"processed": True})\
-                    .eq("id", cmd_item['id'])\
-                    .execute()
-        except Exception as e:
-            print(f"⚠️ Command Check Error: {e}")
+@app.route('/status', methods=['GET'])
+def handle_status():
+    return jsonify(training_flags), 200
 
+def run_server():
+    print("🛰️ Control interface active on port 5000...")
+    app.run(port=5000, host='0.0.0.0', debug=False, use_reloader=False)
+
+# --- STEP 4: Environment Definition ---
 class BlackjackDiceEnv(gym.Env):
     def __init__(self, config):
         super(BlackjackDiceEnv, self).__init__()
-        self.config = config
+        self.config = config or {}
         self.action_space = spaces.Discrete(3)
         self.observation_space = spaces.Box(
             low=np.array([0, 0, 0]), 
-            high=np.array([31, 31, 10000]), 
+            high=np.array([31, 31, 10000000]), 
             dtype=np.float32
         )
-        self.reset_env()
+        self.reset_stats()
 
-    def reset_env(self):
-        self.player_money = self.config.get('initial_player_balance', 1000.0)
+    def _get_cfg(self, key, default):
+        val = self.config.get(key)
+        return val if val is not None else default
+
+    def reset_stats(self):
+        self.player_money = float(self._get_cfg('initial_player_balance', 200000.0))
         self.house_profit = 0.0
         self.refill_count = 0
         self.steps = 0
@@ -113,14 +103,19 @@ class BlackjackDiceEnv(gym.Env):
 
     def step(self, action):
         self.steps += 1
-        reward = 0
+        reward = 0.0
         terminated = False
-        bet = self.config.get('bet_amount', 10.0)
+        
+        bet = float(self._get_cfg('bet_amount', 100.0))
+        win_payout = float(self._get_cfg('win_payout', 200.0))
+        counter_fee = float(self._get_cfg('counter_fee', 50.0))
+        dealer_stand = int(self._get_cfg('dealer_stand', 17))
+        refill_penalty = float(self._get_cfg('refill_penalty', -500.0))
         
         if action == 1: # Hit
             self.player_hand += np.random.randint(1, 7)
-        elif action == 2: # Counter
-            self.player_money -= self.config.get('counter_fee', 5.0)
+        elif action == 2: # Use Counter
+            self.player_money -= counter_fee
             self.counter_hits += 1
             
         if self.player_hand > 21:
@@ -128,14 +123,14 @@ class BlackjackDiceEnv(gym.Env):
             self.player_money -= bet
             self.house_profit += bet
             terminated = True
-        elif action == 0: # Stay
-            while self.dealer_hand < self.config.get('dealer_stand', 17):
+        elif action == 0: # Stand
+            while self.dealer_hand < dealer_stand:
                 self.dealer_hand += np.random.randint(1, 7)
             
             if self.dealer_hand > 21 or self.player_hand > self.dealer_hand:
-                reward = self.config.get('win_payout', 10.0)
-                self.player_money += reward
-                self.house_profit -= reward
+                reward = win_payout
+                self.player_money += win_payout
+                self.house_profit -= win_payout
                 self.wins += 1
             else:
                 reward = -bet
@@ -144,42 +139,102 @@ class BlackjackDiceEnv(gym.Env):
             terminated = True
 
         if self.player_money < bet:
-            self.player_money = self.config.get('max_balance_ref', 2000.0)
-            reward += self.config.get('refill_penalty', -50.0)
+            self.player_money = float(self._get_cfg('initial_player_balance', 200000.0))
+            reward += refill_penalty
             self.refill_count += 1
 
         obs = np.array([self.player_hand, self.dealer_hand, self.player_money], dtype=np.float32)
-        return obs, reward, terminated, False, {}
+        return obs, float(reward), terminated, False, {}
 
-def start_training(config_id, model_name=None):
+# --- STEP 5: Training Logic ---
+class DashboardCallback(BaseCallback):
+    def __init__(self, env, verbose=0):
+        super(DashboardCallback, self).__init__(verbose)
+        self.env_ref = env
+        self.last_db_check = 0
+
+    def _on_step(self) -> bool:
+        # Check stop signal from Flask
+        if training_flags['stop']:
+            print("⚠️ [STOP] Signal received via Flask. Terminating loop...")
+            return False
+            
+        # Periodic database check (every 500 steps)
+        if self.num_timesteps - self.last_db_check > 500:
+            self.last_db_check = self.num_timesteps
+            try:
+                res = supabase.table("system_commands")\
+                    .select("*")\
+                    .eq("processed", False)\
+                    .eq("command", "STOP_TRAINING")\
+                    .order("id", desc=True)\
+                    .limit(1)\
+                    .execute()
+                if res.data:
+                    print("🛑 [STOP] Signal found in Database. Cleaning up...")
+                    supabase.table("system_commands").update({"processed": True}).eq("id", res.data[0]['id']).execute()
+                    return False
+            except:
+                pass
+
+        if self.num_timesteps % 200 == 0:
+            self._sync_to_dashboard()
+        return True
+
+    def _sync_to_dashboard(self):
+        env = self.env_ref
+        wr = (env.wins / max(1, env.steps)) * 100
+        cu = (env.counter_hits / max(1, env.steps)) * 100
+        data = {
+            "step": int(self.num_timesteps),
+            "house_profit": float(env.house_profit),
+            "player_money": float(env.player_money),
+            "win_rate": float(wr),
+            "counter_usage": float(cu),
+            "refill_count": int(env.refill_count)
+        }
+        try:
+            supabase.table("training_logs").insert(data).execute()
+        except:
+            pass
+
+def run_training_cycle(config_id):
     try:
+        print(f"🔍 Loading Context: v{config_id}")
         res = supabase.table("game_configs").select("*").eq("id", config_id).single().execute()
         config = res.data
-        if not config:
-            print(f"❌ Config ID {config_id} not found.")
-            return
+        if not config: return
 
         env = BlackjackDiceEnv(config)
-        
-        if model_name:
-            print(f"🔄 Resuming from {model_name}...")
-            # model = PPO.load(model_name, env=env)
-            model = PPO("MlpPolicy", env, verbose=1)
-        else:
-            model = PPO("MlpPolicy", env, verbose=1)
-        
+        model = PPO("MlpPolicy", env, verbose=0)
         callback = DashboardCallback(env)
-        print("🚀 Training Started...")
-        model.learn(total_timesteps=config.get('total_timesteps', 1000000), callback=callback)
-        print("🏁 Training Finished.")
         
+        total_steps = int(config.get('total_timesteps') or 1000000)
+        print(f"🚀 Training Active...")
+        model.learn(total_timesteps=total_steps, callback=callback)
+        print(f"✅ Training Session Ended.")
     except Exception as e:
-        print(f"🔥 Critical Training Error: {e}")
+        print(f"❌ Failure: {e}")
+        traceback.print_exc()
+    finally:
+        training_flags['active'] = False
+        training_flags['stop'] = False
 
+# --- MAIN LOOP ---
 if __name__ == "__main__":
-    print("🛰️ AI Worker Standby. Monitoring Dashboard commands...")
+    print("\n--- QUANTUMWASTE AI v9.0 INITIALIZED ---")
+    server_thread = threading.Thread(target=run_server)
+    server_thread.daemon = True
+    server_thread.start()
+    
     while True:
         try:
+            if training_flags['active'] and training_flags['config_id']:
+                cfg_id = training_flags['config_id']
+                training_flags['config_id'] = None 
+                run_training_cycle(cfg_id)
+            
+            # Polling for new training tasks
             res = supabase.table("system_commands")\
                 .select("*")\
                 .eq("processed", False)\
@@ -190,23 +245,11 @@ if __name__ == "__main__":
             
             if res.data:
                 cmd = res.data[0]
-                payload = cmd.get('payload', {})
-                config_id = payload.get('config_id')
-                model_name = payload.get('model_name')
+                config_id = cmd.get('payload', {}).get('config_id')
+                supabase.table("system_commands").update({"processed": True}).eq("id", cmd['id']).execute()
+                run_training_cycle(config_id)
                 
-                # Mark command as processed immediately
-                supabase.table("system_commands")\
-                    .update({"processed": True})\
-                    .eq("id", cmd['id'])\
-                    .execute()
-                
-                if config_id:
-                    start_training(config_id, model_name)
-                    
-            time.sleep(5)
-        except KeyboardInterrupt:
-            print("👋 Worker shutdown.")
-            break
         except Exception as e:
-            print(f"⚠️ Main Loop Error: {e}")
-            time.sleep(10)
+            print(f"🚨 Loop Error: {e}")
+        
+        time.sleep(5)

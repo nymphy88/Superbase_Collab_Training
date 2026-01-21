@@ -1,110 +1,58 @@
-import React, { useCallback, useMemo } from 'react';
-import { Database, RefreshCw, PlayCircle, History, FileText, Activity, CheckCircle2 } from 'lucide-react';
-import { useConfigPanelState } from './hooks/useConfigPanelState';
-import { generatePythonWorker } from './config.utils';
-import { ConfigPanelProps, DEFAULT_CONFIG } from './config.types';
 
-// Importing from the main barrel file in components/ as requested for architectural consistency
-import { ConfigInput, ConfigStatItem } from '../index';
+import React, { useState, useMemo, useCallback } from "react";
+// Fix: Use default export to access WidthProvider and correctly wrap the component
+import GridLayout from "react-grid-layout";
+import { ConfigToggle, ConfigDropdown, ConfigInput } from "./components";
 
-const ConfigPanel: React.FC<ConfigPanelProps> = ({ resumeModelName, onClearResume }) => {
-  const {
-    activeConfig,
-    formConfig,
-    loading,
-    copying,
-    setCopying,
-    message,
-    fetchLatestConfig,
-    handleReload,
-    handleStart,
-    setFormValue
-  } = useConfigPanelState(onClearResume);
+// Extracting components from the default export to handle environments where named exports are missing
+const { WidthProvider, Responsive } = GridLayout as any;
+const ResponsiveGridLayout = WidthProvider(Responsive || GridLayout);
 
-  const copyWorkerScript = useCallback(() => {
-    const pythonCode = generatePythonWorker(formConfig, activeConfig?.id);
-    navigator.clipboard.writeText(pythonCode);
-    setCopying(true);
-    setTimeout(() => setCopying(false), 2000);
-  }, [formConfig, activeConfig, setCopying]);
+const ConfigPanel: React.FC = () => {
+  const [layouts, setLayouts] = useState({ lg: [] });
 
-  const statCells = useMemo(() => [
-    { label: 'BET', value: activeConfig?.bet_amount },
-    { label: 'STAND', value: activeConfig?.dealer_stand },
-    { label: 'WIN', value: activeConfig?.win_payout },
-    { label: 'FEE', value: activeConfig?.counter_fee },
-    { label: 'REF', value: activeConfig?.max_balance_ref },
-    { label: 'STEP', value: activeConfig?.total_timesteps ? (activeConfig.total_timesteps/1000).toFixed(0)+'k' : '--' }
-  ], [activeConfig]);
+  // ✅ Memoize layouts เพื่อไม่สร้าง object ใหม่ทุกครั้ง
+  const memoizedLayouts = useMemo(() => layouts, [layouts]);
+
+  // ✅ Memoize handler และตรวจสอบก่อน setState
+  const handleLayoutChange = useCallback(
+    (layout: any, allLayouts: any) => {
+      // ป้องกันการเรียก setState ซ้ำกับค่าเดิม
+      if (JSON.stringify(allLayouts) !== JSON.stringify(layouts)) {
+        setLayouts(allLayouts);
+      }
+    },
+    [layouts]
+  );
 
   return (
-    <div className="bg-[#1e293b] rounded-lg overflow-hidden border border-gray-700 shadow-xl">
-      <div className="grid grid-cols-2">
-        <button 
-          onClick={handleReload} 
-          disabled={loading}
-          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black py-4 flex items-center justify-center gap-2 uppercase tracking-widest text-[10px] border-r border-white/10 transition-all"
-        >
-          <History className="w-4 h-4" /> RELOAD CONFIG
-        </button>
-        <button 
-          onClick={handleStart} 
-          disabled={loading}
-          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black py-4 flex items-center justify-center gap-2 uppercase tracking-widest text-[10px] transition-all"
-        >
-          <PlayCircle className="w-4 h-4" /> START NEW SESSION
-        </button>
+    <ResponsiveGridLayout
+      className="layout"
+      cols={12}
+      rowHeight={30}
+      layouts={memoizedLayouts}
+      onLayoutChange={handleLayoutChange}
+    >
+      <div key="toggle">
+        {/* Fix: Corrected prop names to 'enabled' and 'onToggle' */}
+        <ConfigToggle label="Enable Feature" enabled={true} onToggle={() => {}} />
       </div>
-
-      <div className="p-4 space-y-4">
-        <div className="bg-[#0f172a] border border-blue-500/20 rounded p-4 shadow-inner">
-          <div className="flex justify-between items-start mb-4">
-            <div className="flex gap-3">
-              <Database className="w-4 h-4 text-blue-400 mt-1" />
-              <div>
-                <h2 className="text-[11px] font-black text-blue-400 uppercase tracking-widest">SYSTEM GATEWAY</h2>
-                <p className="text-[8px] font-mono text-gray-500 mt-1 uppercase">ACTIVE ID: <span className="text-blue-300">v{activeConfig?.id || '---'}</span></p>
-                <p className="text-[7px] font-mono text-gray-600">{activeConfig?.created_at ? new Date(activeConfig.created_at).toLocaleString() : 'WAITING FOR DATA...'}</p>
-              </div>
-            </div>
-            <button onClick={() => fetchLatestConfig(true)} className="p-2 hover:bg-white/5 rounded transition-all text-blue-400">
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
-          <div className="grid grid-cols-6 gap-2">
-            {statCells.map((s, i) => (
-              <ConfigStatItem key={i} label={s.label} value={s.value} />
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          {Object.keys(DEFAULT_CONFIG).map((k) => (
-            <ConfigInput 
-              key={k} 
-              label={k.replace(/_/g,' ')} 
-              value={(formConfig as any)[k]} 
-              onChange={(val) => setFormValue(k, val)} 
-            />
-          ))}
-        </div>
-
-        <button 
-          onClick={copyWorkerScript} 
-          className="w-full flex items-center justify-center gap-2 text-[9px] font-black py-3 rounded bg-gray-900 border border-gray-800 text-blue-400 uppercase tracking-widest hover:border-blue-500 transition-all group"
-        >
-          {copying ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <FileText className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />}
-          {copying ? 'COPIED PYTHON WORKER' : 'BOOTSTRAP TO COLAB'}
-        </button>
-
-        {message && (
-          <div className={`p-2.5 rounded text-[10px] font-black uppercase flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300 ${message.type === 'success' ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
-            <Activity className="w-3 h-3" /> {message.text}
-          </div>
-        )}
+      <div key="dropdown">
+        {/* Fix: Added missing 'label' and converted options to object array */}
+        <ConfigDropdown 
+          label="Select Mode" 
+          options={[{label: "A", value: "A"}, {label: "B", value: "B"}, {label: "C", value: "C"}]} 
+          value="A" 
+          onChange={() => {}} 
+        />
       </div>
-    </div>
+      <div key="input">
+        {/* Fix: Added missing 'label' and changed value to number */}
+        <ConfigInput label="Target Value" value={0} onChange={() => {}} />
+      </div>
+    </ResponsiveGridLayout>
   );
 };
 
+// ✅ ใช้ React.memo กัน re-render ที่ไม่จำเป็น
 export default React.memo(ConfigPanel);

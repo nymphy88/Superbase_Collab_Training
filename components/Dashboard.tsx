@@ -5,10 +5,9 @@ import { TrainingLog } from '../types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, DollarSign, Activity, GripVertical, RotateCcw, User } from 'lucide-react';
 import StatCard from './StatCard';
-// Fix: Use the suggested import pattern for react-grid-layout to avoid named export issues
-import { Responsive, WidthProvider } from 'react-grid-layout';
+import RGL from 'react-grid-layout';
 
-// Stable HOC outside the component prevents unmounting/re-mounting loops
+const { Responsive, WidthProvider } = RGL as any;
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
 const DASH_CONFIG = {
@@ -94,7 +93,7 @@ const Dashboard: React.FC = () => {
   }, []);
 
   const latest = useMemo(() => logs.length > 0 ? logs[logs.length - 1] : null, [logs]);
-  const playerNetProfit = useMemo(() => latest ? -latest.house_profit : 0, [latest]);
+  const playerNetProfit = useMemo(() => latest ? -(latest.house_profit ?? 0) : 0, [latest]);
 
   return (
     <div className="space-y-6 p-2">
@@ -130,7 +129,7 @@ const Dashboard: React.FC = () => {
         useCSSTransforms={true}
       >
         <div key="stats-house-profit">
-          <StatCard title="House Net Profit" value={latest ? Math.floor(latest.house_profit).toLocaleString() : '0'} icon={<DollarSign className="text-yellow-400 w-4 h-4" />} color="text-yellow-400" />
+          <StatCard title="House Net Profit" value={latest ? Math.floor(latest.house_profit ?? 0).toLocaleString() : '0'} icon={<DollarSign className="text-yellow-400 w-4 h-4" />} color="text-yellow-400" />
         </div>
         <div key="stats-player-profit">
           <StatCard title="Player Net Profit" value={playerNetProfit ? Math.floor(playerNetProfit).toLocaleString() : '0'} icon={<User className="text-emerald-400 w-4 h-4" />} color="text-emerald-400" />
@@ -139,16 +138,23 @@ const Dashboard: React.FC = () => {
           <div className="h-full w-full bg-blue-900/10 border border-blue-500/30 rounded-xl p-3 flex items-center justify-between group grid-card-header hover:bg-blue-900/20 transition-all cursor-grab active:cursor-grabbing">
             <div className="pointer-events-none">
               <p className="text-blue-400/60 text-[9px] uppercase font-black tracking-widest">Win Rate</p>
-              <h3 className="text-xl font-black mt-0.5 text-blue-300 tracking-tighter tabular-nums">{latest ? `${latest.win_rate.toFixed(1)}%` : '0%'}</h3>
+              <h3 className="text-xl font-black mt-0.5 text-blue-300 tracking-tighter tabular-nums">
+                {latest && latest.win_rate != null ? `${latest.win_rate.toFixed(1)}%` : '0.0%'}
+              </h3>
             </div>
             <div className="bg-blue-500/20 p-2 rounded-lg border border-blue-500/30"><TrendingUp className="text-blue-400 w-5 h-5" /></div>
           </div>
         </div>
         <div key="stats-refills">
-          <StatCard title="Bankrupt Refills" value={latest ? latest.refill_count : 0} icon={<RotateCcw className="text-red-400 w-4 h-4" />} color="text-red-400" />
+          <StatCard title="Bankrupt Refills" value={latest ? (latest.refill_count ?? 0) : 0} icon={<RotateCcw className="text-red-400 w-4 h-4" />} color="text-red-400" />
         </div>
         <div key="stats-counter">
-          <StatCard title="Counter Triggered" value={latest ? `${latest.counter_usage.toFixed(1)}%` : '0%'} icon={<Activity className="text-purple-400 w-4 h-4" />} color="text-purple-400" />
+          <StatCard 
+            title="Counter Triggered" 
+            value={latest && latest.counter_usage != null ? `${latest.counter_usage.toFixed(1)}%` : '0.0%'} 
+            icon={<Activity className="text-purple-400 w-4 h-4" />} 
+            color="text-purple-400" 
+          />
         </div>
 
         <div key="chart-house" className="bg-gray-800 rounded-xl border border-gray-700 shadow-xl flex flex-col overflow-hidden group">
@@ -161,7 +167,7 @@ const Dashboard: React.FC = () => {
               <LineChart data={logs}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
                 <XAxis dataKey="step" hide />
-                <YAxis stroke="#4b5563" fontSize={10} width={40} tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} />
+                <YAxis stroke="#4b5563" fontSize={10} width={40} tickFormatter={(val) => `$${((val || 0) / 1000).toFixed(0)}k`} />
                 <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', fontSize: '11px' }} />
                 <Line type="stepAfter" dataKey="house_profit" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
@@ -179,7 +185,7 @@ const Dashboard: React.FC = () => {
               <LineChart data={logs}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
                 <XAxis dataKey="step" hide />
-                <YAxis stroke="#4b5563" fontSize={10} width={40} tickFormatter={(val) => `${val}%`} />
+                <YAxis stroke="#4b5563" fontSize={10} width={40} tickFormatter={(val) => `${val || 0}%`} />
                 <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', fontSize: '11px' }} />
                 <Line type="monotone" dataKey="win_rate" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
@@ -197,7 +203,7 @@ const Dashboard: React.FC = () => {
               <LineChart data={logs}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
                 <XAxis dataKey="step" hide />
-                <YAxis stroke="#4b5563" fontSize={10} width={40} tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} />
+                <YAxis stroke="#4b5563" fontSize={10} width={40} tickFormatter={(val) => `$${((val || 0) / 1000).toFixed(0)}k`} />
                 <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', fontSize: '11px' }} />
                 <Line type="monotone" dataKey="player_money" stroke="#10b981" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
@@ -222,11 +228,11 @@ const Dashboard: React.FC = () => {
               <tbody className="divide-y divide-gray-700/50">
                 {[...logs].reverse().slice(0, 15).map((log) => (
                   <tr key={log.id} className="hover:bg-gray-700/30 transition-colors">
-                    <td className="px-3 py-2 font-mono text-gray-400">{log.step.toLocaleString()}</td>
-                    <td className={`px-3 py-2 font-bold ${log.house_profit >= 0 ? 'text-yellow-500' : 'text-red-400'}`}>
-                      ${Math.floor(log.house_profit).toLocaleString()}
+                    <td className="px-3 py-2 font-mono text-gray-400">{(log.step ?? 0).toLocaleString()}</td>
+                    <td className={`px-3 py-2 font-bold ${(log.house_profit ?? 0) >= 0 ? 'text-yellow-500' : 'text-red-400'}`}>
+                      ${Math.floor(log.house_profit ?? 0).toLocaleString()}
                     </td>
-                    <td className="px-3 py-2 text-blue-400">{log.win_rate.toFixed(1)}%</td>
+                    <td className="px-3 py-2 text-blue-400">{log.win_rate != null ? log.win_rate.toFixed(1) : '0.0'}%</td>
                   </tr>
                 ))}
               </tbody>

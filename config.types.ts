@@ -1,3 +1,4 @@
+
 import { GameConfig } from './types';
 
 export const DEFAULT_CONFIG: GameConfig = {

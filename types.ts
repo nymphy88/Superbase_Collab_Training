@@ -13,6 +13,7 @@ export interface GameConfig {
   total_timesteps: number;
   max_balance_ref?: number;
   refill_penalty?: number;
+  NGROK_URL?: string; // Added for direct engine communication
 }
 
 export interface TrainingLog {
